@@ -1,13 +1,20 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
-import { User } from '../users/user.entity';
+import { User, UserRole } from '../users/user.entity';
+import { DEMO_EMAIL_BY_ROLE } from './demo.constants';
 
 @Injectable()
 export class AuthService {
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
+    private configService: ConfigService,
   ) {}
 
   async validateUser(email: string, password: string): Promise<User> {
@@ -21,9 +28,7 @@ export class AuthService {
     return user;
   }
 
-  async login(email: string, password: string) {
-    const user = await this.validateUser(email, password);
-
+  private toAuthResponse(user: User) {
     const payload = {
       sub: user.id,
       email: user.email,
@@ -44,5 +49,28 @@ export class AuthService {
         firmaUrl: user.firmaUrl,
       },
     };
+  }
+
+  async login(email: string, password: string) {
+    const user = await this.validateUser(email, password);
+    return this.toAuthResponse(user);
+  }
+
+  /** Sin contraseña; solo si DEMO_MODE=true en el servidor. */
+  async demoLogin(rol: UserRole) {
+    if (this.configService.get<string>('DEMO_MODE') !== 'true') {
+      throw new ForbiddenException('El modo demo no está habilitado en el servidor.');
+    }
+    const email = DEMO_EMAIL_BY_ROLE[rol];
+    const user = await this.usersService.findByEmail(email);
+    if (!user) {
+      throw new UnauthorizedException(
+        'Usuario demo no encontrado. Ejecutá npm run seed en el backend.',
+      );
+    }
+    if (!user.isActive) {
+      throw new UnauthorizedException('Usuario demo inactivo.');
+    }
+    return this.toAuthResponse(user);
   }
 }

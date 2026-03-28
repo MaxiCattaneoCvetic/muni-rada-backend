@@ -4,8 +4,8 @@
 -- Ejecutar en Supabase → SQL Editor
 -- ============================================================
 
--- Nota: Este hash corresponde a la contraseña "Admin123!"
--- El usuario DEBERÁ cambiarla al primer login (mustChangePassword = true)
+-- Hash bcrypt de la contraseña "password" (mismo que npm run seed en backend/)
+-- En local preferí: npm run seed (crea esquema + usuario)
 
 INSERT INTO users (
   id,

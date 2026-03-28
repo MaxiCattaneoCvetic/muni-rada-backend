@@ -4,11 +4,13 @@ import { Repository } from 'typeorm';
 import { Presupuesto } from './presupuesto.entity';
 import { User } from '../users/user.entity';
 import { IsString, IsNotEmpty, IsOptional, IsNumber, Min } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreatePresupuestoDto {
   @ApiProperty() @IsString() @IsNotEmpty() proveedor: string;
   @ApiPropertyOptional() @IsString() @IsOptional() cuit?: string;
+  @Type(() => Number)
   @ApiProperty() @IsNumber() @Min(0) monto: number;
   @ApiPropertyOptional() @IsString() @IsOptional() plazoEntrega?: string;
   @ApiPropertyOptional() @IsString() @IsOptional() contacto?: string;

@@ -6,6 +6,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { IsString, IsNotEmpty, IsOptional, IsNumber, Min } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional, ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -54,6 +55,7 @@ export class Sellado {
 export class RegistrarSelladoDto {
   @ApiProperty({ example: 'SELL-2026-082' }) @IsString() @IsNotEmpty() numeroSellado: string;
   @ApiProperty({ example: '2026-03-15' }) @IsString() @IsNotEmpty() fechaSellado: string;
+  @Type(() => Number)
   @ApiProperty({ example: 15000 }) @IsNumber() @Min(0) montoSellado: number;
 }
 

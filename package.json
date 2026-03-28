@@ -6,7 +6,9 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main",
     "start:dev": "ts-node src/main.ts",
-    "dev": "ts-node src/main.ts"
+    "dev": "ts-node src/main.ts",
+    "seed": "ts-node scripts/seed-dev.ts",
+    "test:demo": "node scripts/test-demo-auth.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",
