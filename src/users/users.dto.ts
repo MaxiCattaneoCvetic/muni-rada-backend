@@ -1,6 +1,7 @@
-import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MinLength, IsArray } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole } from './user.entity';
+import { AreaMunicipal } from '../common/enums/area-municipal.enum';
 
 export class CreateUserDto {
   @ApiProperty({ example: 'maria.gonzalez@radatilly.gob.ar' })
@@ -26,6 +27,17 @@ export class CreateUserDto {
   @IsString()
   @MinLength(6)
   password: string;
+
+  @ApiPropertyOptional({ enum: AreaMunicipal })
+  @IsOptional()
+  @IsEnum(AreaMunicipal)
+  areaAsignada?: AreaMunicipal | null;
+
+  @ApiPropertyOptional({ type: [String], enum: AreaMunicipal, isArray: true })
+  @IsOptional()
+  @IsArray()
+  @IsEnum(AreaMunicipal, { each: true })
+  areasPedidoPermitidas?: AreaMunicipal[] | null;
 }
 
 export class UpdateUserDto {
@@ -47,6 +59,17 @@ export class UpdateUserDto {
   @ApiPropertyOptional()
   @IsOptional()
   isActive?: boolean;
+
+  @ApiPropertyOptional({ enum: AreaMunicipal, nullable: true })
+  @IsOptional()
+  @IsEnum(AreaMunicipal)
+  areaAsignada?: AreaMunicipal | null;
+
+  @ApiPropertyOptional({ type: [String], enum: AreaMunicipal, isArray: true, nullable: true })
+  @IsOptional()
+  @IsArray()
+  @IsEnum(AreaMunicipal, { each: true })
+  areasPedidoPermitidas?: AreaMunicipal[] | null;
 }
 
 export class ChangePasswordDto {

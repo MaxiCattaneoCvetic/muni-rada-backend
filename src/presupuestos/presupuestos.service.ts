@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Presupuesto } from './presupuesto.entity';
 import { User } from '../users/user.entity';
+import { ConfigSystemService } from '../config/config.module';
 import { IsString, IsNotEmpty, IsOptional, IsNumber, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -22,6 +23,7 @@ export class PresupuestosService {
   constructor(
     @InjectRepository(Presupuesto)
     private repo: Repository<Presupuesto>,
+    private configService: ConfigSystemService,
   ) {}
 
   async findByPedido(pedidoId: string): Promise<Presupuesto[]> {
@@ -39,6 +41,11 @@ export class PresupuestosService {
   }
 
   async create(pedidoId: string, dto: CreatePresupuestoDto, user: User, archivoUrl?: string, archivoPath?: string): Promise<Presupuesto> {
+    const max = await this.configService.getMaxPresupuestos();
+    const actuales = await this.repo.count({ where: { pedidoId } });
+    if (actuales >= max) {
+      throw new BadRequestException(`Se alcanzó el máximo de ${max} presupuestos por pedido`);
+    }
     const presup = this.repo.create({
       ...dto,
       pedidoId,

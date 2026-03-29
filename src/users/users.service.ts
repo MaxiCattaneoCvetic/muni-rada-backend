@@ -30,9 +30,10 @@ export class UsersService {
     const existing = await this.findByEmail(dto.email);
     if (existing) throw new ConflictException('El email ya está en uso');
 
-    const hashedPassword = await bcrypt.hash(dto.password, 10);
+    const { password, ...rest } = dto;
+    const hashedPassword = await bcrypt.hash(password, 10);
     const user = this.usersRepository.create({
-      ...dto,
+      ...rest,
       email: dto.email.toLowerCase(),
       password: hashedPassword,
       mustChangePassword: true, // siempre debe cambiar al primer login

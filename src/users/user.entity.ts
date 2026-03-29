@@ -1,8 +1,9 @@
 import {
   Entity, PrimaryGeneratedColumn, Column, CreateDateColumn,
-  UpdateDateColumn, OneToMany,
+  UpdateDateColumn,
 } from 'typeorm';
 import { Exclude } from 'class-transformer';
+import { AreaMunicipal } from '../common/enums/area-municipal.enum';
 
 export enum UserRole {
   SECRETARIA = 'secretaria',
@@ -44,6 +45,18 @@ export class User {
 
   @Column({ nullable: true, name: 'firma_path' })
   firmaPath: string;
+
+  /** Área municipal del usuario (referencia organizacional). */
+  @Column({ type: 'varchar', length: 64, nullable: true, name: 'area_asignada' })
+  areaAsignada: AreaMunicipal | null;
+
+  /**
+   * Áreas para las que puede crear pedidos como solicitante.
+   * null = sin restricción explícita (todas las áreas; compatibilidad).
+   * [] = no puede crear pedidos.
+   */
+  @Column({ type: 'simple-json', nullable: true, name: 'areas_pedido_permitidas' })
+  areasPedidoPermitidas: AreaMunicipal[] | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

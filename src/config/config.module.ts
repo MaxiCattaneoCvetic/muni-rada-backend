@@ -4,7 +4,7 @@ import { Injectable, Module, Controller, Get, Put, Body, UseGuards, Request } fr
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { IsNumber, IsBoolean, IsOptional, Min } from 'class-validator';
+import { IsNumber, IsBoolean, IsOptional, Min, Max } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -22,6 +22,10 @@ export class SistemaConfig {
 
   @Column({ name: 'min_presupuestos', default: 3 })
   minPresupuestos: number;
+
+  /** Máximo de cotizaciones que se pueden cargar por pedido (tope duro). */
+  @Column({ name: 'max_presupuestos', default: 5 })
+  maxPresupuestos: number;
 
   @Column({ name: 'bloquear_pago_sin_sellado', default: true })
   bloquearPagoSinSellado: boolean;
@@ -43,7 +47,8 @@ export class SistemaConfig {
 // ── DTO ──────────────────────────────────────────────────────────────
 export class UpdateConfigDto {
   @ApiPropertyOptional({ example: 350000 }) @IsNumber() @Min(0) @IsOptional() umbralSellado?: number;
-  @ApiPropertyOptional({ example: 3 }) @IsNumber() @Min(1) @IsOptional() minPresupuestos?: number;
+  @ApiPropertyOptional({ example: 3 }) @IsNumber() @Min(1) @Max(5) @IsOptional() minPresupuestos?: number;
+  @ApiPropertyOptional({ example: 5 }) @IsNumber() @Min(1) @Max(5) @IsOptional() maxPresupuestos?: number;
   @ApiPropertyOptional() @IsBoolean() @IsOptional() bloquearPagoSinSellado?: boolean;
   @ApiPropertyOptional() @IsOptional() nombreMunicipalidad?: string;
   @ApiPropertyOptional() @IsOptional() cuitInstitucional?: string;
@@ -80,9 +85,17 @@ export class ConfigSystemService {
     return cfg.minPresupuestos;
   }
 
+  async getMaxPresupuestos(): Promise<number> {
+    const cfg = await this.getConfig();
+    return cfg.maxPresupuestos;
+  }
+
   async update(dto: UpdateConfigDto, user: User): Promise<SistemaConfig> {
     const cfg = await this.getConfig();
     Object.assign(cfg, dto);
+    if (cfg.minPresupuestos > cfg.maxPresupuestos) {
+      cfg.minPresupuestos = cfg.maxPresupuestos;
+    }
     cfg.modificadoPor = user;
     this.config = null; // invalidate cache
     return this.repo.save(cfg);

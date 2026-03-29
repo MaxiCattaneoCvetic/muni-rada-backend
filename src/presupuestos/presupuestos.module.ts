@@ -10,6 +10,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../users/user.entity';
 import { ArchivosModule } from '../archivos/archivos.module';
 import { ArchivosService } from '../archivos/archivos.service';
+import { ConfigSystemModule } from '../config/config.module';
 
 @ApiTags('Presupuestos')
 @ApiBearerAuth()
@@ -38,13 +39,20 @@ export class PresupuestosController {
     @Request() req,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    let url: string, path: string;
+    let archivoUrl: string | undefined;
+    let archivoPath: string | undefined;
     if (file) {
-      const result = await this.archivosService.uploadPresupuesto(file, pedidoId);
-      url = result.url;
-      path = result.path;
+      if (this.archivosService.isStorageAvailable()) {
+        const result = await this.archivosService.uploadPresupuesto(file, pedidoId);
+        archivoUrl = result.url;
+        archivoPath = result.path;
+      } else {
+        console.warn(
+          `[presupuestos] Adjunto omitido para pedido ${pedidoId}: configurá SUPABASE_URL y SUPABASE_SERVICE_KEY para guardar PDFs.`,
+        );
+      }
     }
-    return this.service.create(pedidoId, dto, req.user, url, path);
+    return this.service.create(pedidoId, dto, req.user, archivoUrl, archivoPath);
   }
 
   @Delete(':id')
@@ -57,7 +65,7 @@ export class PresupuestosController {
 }
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Presupuesto]), ArchivosModule],
+  imports: [TypeOrmModule.forFeature([Presupuesto]), ArchivosModule, ConfigSystemModule],
   providers: [PresupuestosService],
   controllers: [PresupuestosController],
   exports: [PresupuestosService],

@@ -13,6 +13,7 @@ import { Presupuesto } from '../src/presupuestos/presupuesto.entity';
 import { Pago } from '../src/pagos/pagos.module';
 import { Sellado } from '../src/sellados/sellados.module';
 import { SistemaConfig } from '../src/config/config.module';
+import { Proveedor } from '../src/proveedores/proveedor.entity';
 import { DEMO_EMAIL_BY_ROLE } from '../src/auth/demo.constants';
 
 function loadEnv() {
@@ -67,7 +68,7 @@ async function main() {
       process.env.DATABASE_SSL === 'true'
         ? { rejectUnauthorized: false }
         : false,
-    entities: [User, Pedido, Presupuesto, Pago, Sellado, SistemaConfig],
+    entities: [User, Pedido, Presupuesto, Proveedor, Pago, Sellado, SistemaConfig],
     synchronize: true,
     logging: false,
   });
@@ -120,6 +121,19 @@ async function main() {
         }),
       );
       console.log(`Usuario demo creado: ${email} (${rol})`);
+    }
+
+    const provRepo = ds.getRepository(Proveedor);
+    const semillas = [
+      { nombre: 'Distribuidora Sur S.A.', cuit: '30-12345678-9', contacto: 'compras@distsur.com' },
+      { nombre: 'Ferretería Rada Tilly', contacto: '221 555-0100' },
+      { nombre: 'Papelera Patagónica', contacto: 'ventas@papelera.com' },
+    ];
+    for (const s of semillas) {
+      const exists = await provRepo.findOne({ where: { nombre: s.nombre } });
+      if (exists) continue;
+      await provRepo.save(provRepo.create(s));
+      console.log(`Proveedor de ejemplo: ${s.nombre}`);
     }
 
     console.log('');

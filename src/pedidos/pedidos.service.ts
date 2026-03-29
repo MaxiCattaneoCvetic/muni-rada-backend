@@ -11,6 +11,9 @@ import {
 import { User, UserRole } from '../users/user.entity';
 import { PresupuestosService } from '../presupuestos/presupuestos.service';
 import { ConfigSystemService } from '../config/config.service';
+import { ArchivosService } from '../archivos/archivos.service';
+import { UsersService } from '../users/users.service';
+import { userMayRequestPedidoForArea } from '../common/enums/area-municipal.enum';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -20,6 +23,8 @@ export class PedidosService {
     private pedidosRepo: Repository<Pedido>,
     private presupuestosService: PresupuestosService,
     private configService: ConfigSystemService,
+    private archivosService: ArchivosService,
+    private usersService: UsersService,
   ) {}
 
   // ── HELPERS ──────────────────────────────────────────────────────────
@@ -34,6 +39,14 @@ export class PedidosService {
       throw new BadRequestException(msg || `El pedido no está en la etapa correcta para esta acción`);
   }
 
+  private assertNotRechazado(pedido: Pedido) {
+    if (pedido.stage === PedidoStage.RECHAZADO) {
+      throw new BadRequestException(
+        'Este pedido figura como rechazado y no puede avanzar ni modificarse en el circuito de suministros.',
+      );
+    }
+  }
+
   // ── QUERIES ──────────────────────────────────────────────────────────
 
   async findAll(filter: PedidoFilterDto = {}): Promise<Pedido[]> {
@@ -45,15 +58,37 @@ export class PedidosService {
     const options: FindManyOptions<Pedido> = {
       where,
       order: { urgente: 'DESC', createdAt: 'DESC' },
-      relations: ['creadoPor', 'aprobadoPor', 'firmadoPor'],
+      relations: ['creadoPor', 'aprobadoPor', 'firmadoPor', 'facturaSubidaPor'],
     };
-    return this.pedidosRepo.find(options);
+    const list = await this.pedidosRepo.find(options);
+    await this.attachPresupuestosCargados(list);
+    return list;
+  }
+
+  /** Cantidad de presupuestos por pedido (para UI / Kanban). No persiste en DB. */
+  private async attachPresupuestosCargados(pedidos: Pedido[]): Promise<void> {
+    if (pedidos.length === 0) return;
+    const ids = [...new Set(pedidos.map((p) => p.id))];
+    const rows = await this.pedidosRepo.manager
+      .createQueryBuilder()
+      .select('pr.pedido_id', 'pedidoId')
+      .addSelect('COUNT(*)', 'cnt')
+      .from('presupuestos', 'pr')
+      .where('pr.pedido_id IN (:...ids)', { ids })
+      .groupBy('pr.pedido_id')
+      .getRawMany();
+    const map = new Map<string, number>(
+      rows.map((r: { pedidoId: string; cnt: string }) => [r.pedidoId, parseInt(r.cnt, 10)]),
+    );
+    for (const p of pedidos) {
+      (p as Pedido & { presupuestosCargados: number }).presupuestosCargados = map.get(p.id) ?? 0;
+    }
   }
 
   async findById(id: string): Promise<Pedido> {
     const p = await this.pedidosRepo.findOne({
       where: { id },
-      relations: ['creadoPor', 'aprobadoPor', 'firmadoPor', 'recepcionConfirmadaPor'],
+      relations: ['creadoPor', 'aprobadoPor', 'firmadoPor', 'facturaSubidaPor', 'recepcionConfirmadaPor'],
     });
     if (!p) throw new NotFoundException(`Pedido ${id} no encontrado`);
     return p;
@@ -68,12 +103,17 @@ export class PedidosService {
   // Pedidos que le corresponden según rol
   async findForRole(user: User, filter: PedidoFilterDto = {}): Promise<Pedido[]> {
     const stagesByRole: Record<UserRole, PedidoStage[]> = {
-      [UserRole.SECRETARIA]: [PedidoStage.APROBACION, PedidoStage.FIRMA],
-      [UserRole.COMPRAS]: [PedidoStage.PRESUPUESTOS],
+      // Secretaría actúa en 1 y 3, pero ve también 2 para seguimiento (presupuestos en curso en Compras).
+      [UserRole.SECRETARIA]: [
+        PedidoStage.APROBACION, PedidoStage.PRESUPUESTOS, PedidoStage.FIRMA, PedidoStage.CARGA_FACTURA,
+        PedidoStage.RECHAZADO,
+      ],
+      [UserRole.COMPRAS]: [PedidoStage.PRESUPUESTOS, PedidoStage.CARGA_FACTURA, PedidoStage.RECHAZADO],
       [UserRole.TESORERIA]: [PedidoStage.GESTION_PAGOS],
       [UserRole.ADMIN]: [
-        PedidoStage.APROBACION, PedidoStage.PRESUPUESTOS, PedidoStage.FIRMA,
+        PedidoStage.APROBACION, PedidoStage.PRESUPUESTOS, PedidoStage.FIRMA, PedidoStage.CARGA_FACTURA,
         PedidoStage.GESTION_PAGOS, PedidoStage.ESPERANDO_SUMINISTROS, PedidoStage.SUMINISTROS_LISTOS,
+        PedidoStage.RECHAZADO,
       ],
     };
     const stages = stagesByRole[user.rol] || [];
@@ -110,7 +150,17 @@ export class PedidosService {
   // ── FLOW ACTIONS ─────────────────────────────────────────────────────
 
   // Etapa 0 → 1: crear pedido
-  async create(dto: CreatePedidoDto, user: User): Promise<Pedido> {
+  async create(
+    dto: CreatePedidoDto,
+    user: User,
+    archivosReferencia: Express.Multer.File[] = [],
+  ): Promise<Pedido> {
+    const fullUser = await this.usersService.findById(user.id);
+    if (!userMayRequestPedidoForArea(fullUser.areasPedidoPermitidas, dto.area)) {
+      throw new ForbiddenException(
+        'No tenés permiso para crear pedidos para el área seleccionada. Consultá con administración.',
+      );
+    }
     const numero = await this.generateNumero();
     const pedido = this.pedidosRepo.create({
       ...dto,
@@ -118,12 +168,36 @@ export class PedidosService {
       stage: PedidoStage.APROBACION,
       creadoPor: user,
     });
-    return this.pedidosRepo.save(pedido);
+    const saved = await this.pedidosRepo.save(pedido);
+
+    if (archivosReferencia.length > 0) {
+      if (!this.archivosService.isStorageAvailable()) {
+        throw new BadRequestException(
+          'Storage no configurado. No se pueden adjuntar imágenes hasta configurar SUPABASE_URL y SUPABASE_SERVICE_KEY.',
+        );
+      }
+      const refs: { url: string; path: string }[] = [];
+      for (let i = 0; i < archivosReferencia.length; i++) {
+        const file = archivosReferencia[i];
+        const suffix = `${Date.now()}_${i}_${crypto.randomBytes(4).toString('hex')}`;
+        const { url, path: storagePath } = await this.archivosService.uploadReferenciaPedido(
+          file,
+          saved.id,
+          suffix,
+        );
+        refs.push({ url, path: storagePath });
+      }
+      saved.referenciasImagenes = refs;
+      return this.pedidosRepo.save(saved);
+    }
+
+    return saved;
   }
 
   // Etapa 1 → 2: Secretaría aprueba
   async aprobar(id: string, dto: AprobarPedidoDto, user: User): Promise<Pedido> {
     const pedido = await this.findById(id);
+    this.assertNotRechazado(pedido);
     this.assertStage(pedido, PedidoStage.APROBACION, 'Solo se pueden aprobar pedidos en etapa de Aprobación');
     pedido.stage = PedidoStage.PRESUPUESTOS;
     pedido.aprobadoPor = user;
@@ -136,6 +210,7 @@ export class PedidosService {
     const pedido = await this.findById(id);
     if (pedido.stage !== PedidoStage.APROBACION && pedido.stage !== PedidoStage.FIRMA)
       throw new BadRequestException('Solo se pueden rechazar pedidos en etapa Aprobación o Firma');
+    pedido.rechazadoDesdeStage = pedido.stage;
     pedido.stage = PedidoStage.RECHAZADO;
     pedido.aprobadoPor = user;
     pedido.notaRechazo = dto.motivo;
@@ -145,6 +220,7 @@ export class PedidosService {
   // Etapa 2 → 3: Compras envía a Secretaría para firma
   async enviarAFirma(id: string, user: User): Promise<Pedido> {
     const pedido = await this.findById(id);
+    this.assertNotRechazado(pedido);
     this.assertStage(pedido, PedidoStage.PRESUPUESTOS, 'El pedido debe estar en etapa de Presupuestos');
 
     const presupuestos = await this.presupuestosService.findByPedido(id);
@@ -163,6 +239,7 @@ export class PedidosService {
   // Etapa 2 → 3: También puede ser manual (Compras elige proveedor)
   async seleccionarPresupuesto(id: string, presupuestoId: string, user: User): Promise<Pedido> {
     const pedido = await this.findById(id);
+    this.assertNotRechazado(pedido);
     this.assertStage(pedido, PedidoStage.PRESUPUESTOS);
     const presup = await this.presupuestosService.findById(presupuestoId);
     pedido.proveedorSeleccionado = presup.proveedor;
@@ -174,15 +251,23 @@ export class PedidosService {
   // Etapa 3 → 4: Secretaría firma presupuesto (usa firma del perfil)
   async firmar(id: string, dto: FirmarPresupuestoDto, user: User): Promise<Pedido> {
     const pedido = await this.findById(id);
+    this.assertNotRechazado(pedido);
     this.assertStage(pedido, PedidoStage.FIRMA, 'El pedido debe estar en etapa de Firma');
+
+    const presup = await this.presupuestosService.findById(dto.presupuestoId);
+    if (presup.pedidoId !== id)
+      throw new BadRequestException('El presupuesto no pertenece a este pedido');
 
     if (!user.firmaUrl)
       throw new BadRequestException('No tenés una firma configurada en tu perfil. Subí tu firma escaneada primero.');
 
-    const umbral = await this.configService.getUmbralSellado();
-    const requiereSellado = (pedido.monto || 0) >= umbral;
+    pedido.proveedorSeleccionado = presup.proveedor;
+    pedido.monto = presup.monto;
 
-    pedido.stage = PedidoStage.GESTION_PAGOS;
+    const umbral = await this.configService.getUmbralSellado();
+    const requiereSellado = (Number(pedido.monto) || 0) >= umbral;
+
+    pedido.stage = PedidoStage.CARGA_FACTURA;
     pedido.firmadoPor = user;
     pedido.firmaUrlUsada = user.firmaUrl;
     pedido.firmadoEn = new Date();
@@ -195,15 +280,38 @@ export class PedidosService {
   // Etapa 3 → 2: Secretaría rechaza presupuesto (vuelve a Compras)
   async rechazarPresupuesto(id: string, dto: RechazarPedidoDto, user: User): Promise<Pedido> {
     const pedido = await this.findById(id);
+    this.assertNotRechazado(pedido);
     this.assertStage(pedido, PedidoStage.FIRMA);
     pedido.stage = PedidoStage.PRESUPUESTOS;
     pedido.notaRechazo = dto.motivo;
     return this.pedidosRepo.save(pedido);
   }
 
-  // Etapa 4 → 5: Tesorería registra pago → pasa a Esperando suministros
+  // Etapa 4 → 5: Compras sube factura del proveedor → Tesorería
+  async subirFactura(
+    id: string,
+    file: Express.Multer.File | undefined,
+    user: User,
+  ): Promise<Pedido> {
+    const pedido = await this.findById(id);
+    this.assertNotRechazado(pedido);
+    this.assertStage(pedido, PedidoStage.CARGA_FACTURA, 'El pedido debe estar en etapa de carga de factura');
+    if (!file)
+      throw new BadRequestException('Debés adjuntar la factura en PDF');
+
+    const { url, path } = await this.archivosService.uploadFacturaCompras(file, id);
+    pedido.facturaComprasUrl = url;
+    pedido.facturaComprasPath = path;
+    pedido.facturaSubidaPor = user;
+    pedido.facturaSubidaEn = new Date();
+    pedido.stage = PedidoStage.GESTION_PAGOS;
+    return this.pedidosRepo.save(pedido);
+  }
+
+  // Etapa 5 → 6: Tesorería registra pago → pasa a Esperando suministros
   async marcarPagado(id: string, user: User): Promise<Pedido> {
     const pedido = await this.findById(id);
+    this.assertNotRechazado(pedido);
     this.assertStage(pedido, PedidoStage.GESTION_PAGOS);
     if (pedido.bloqueado)
       throw new BadRequestException('El pedido está bloqueado. Registrá el sellado provincial primero.');
@@ -214,6 +322,7 @@ export class PedidosService {
   // Desbloquear cuando sellado está registrado
   async desbloquear(id: string): Promise<Pedido> {
     const pedido = await this.findById(id);
+    this.assertNotRechazado(pedido);
     pedido.bloqueado = false;
     return this.pedidosRepo.save(pedido);
   }
@@ -221,6 +330,7 @@ export class PedidosService {
   // Etapa 5 → 6: Admin confirma recepción de suministros
   async confirmarRecepcion(id: string, dto: ConfirmarRecepcionDto, user: User): Promise<Pedido> {
     const pedido = await this.findById(id);
+    this.assertNotRechazado(pedido);
     this.assertStage(pedido, PedidoStage.ESPERANDO_SUMINISTROS, 'El pedido debe estar en Esperando suministros');
     pedido.stage = PedidoStage.SUMINISTROS_LISTOS;
     pedido.recepcionConfirmadaPor = user;

@@ -19,6 +19,11 @@ export class ArchivosService {
     this.supabase = createClient(url, key);
   }
 
+  /** True cuando hay cliente de storage (Supabase). Si es false, los endpoints pueden omitir el adjunto en lugar de fallar. */
+  isStorageAvailable(): boolean {
+    return !!this.supabase;
+  }
+
   private async upload(file: Express.Multer.File, folder: string, filename: string): Promise<{ url: string; path: string }> {
     if (!this.supabase) throw new BadRequestException('Storage no configurado. Configurá SUPABASE_URL y SUPABASE_SERVICE_KEY.');
 
@@ -58,6 +63,18 @@ export class ArchivosService {
     return this.upload(file, 'facturas', `factura_${pedidoId}_${Date.now()}`);
   }
 
+  /** Factura cargada por Compras antes de gestión de pagos (Tesorería). */
+  async uploadFacturaCompras(file: Express.Multer.File, pedidoId: string) {
+    this.validatePdf(file);
+    return this.upload(file, 'facturas_compras', `factura_compras_${pedidoId}_${Date.now()}`);
+  }
+
+  /** Fotos de referencia adjuntas al crear el pedido (solo imágenes). */
+  async uploadReferenciaPedido(file: Express.Multer.File, pedidoId: string, suffix: string) {
+    this.validateReferenciaImagen(file);
+    return this.upload(file, 'referencias_pedidos', `ref_${pedidoId}_${suffix}`);
+  }
+
   async deleteFile(path: string): Promise<void> {
     if (!this.supabase) return;
     await this.supabase.storage.from(this.bucket).remove([path]);
@@ -79,6 +96,15 @@ export class ArchivosService {
       throw new BadRequestException('Solo se permiten imágenes (JPG, PNG) o PDF');
     if (file.size > 5 * 1024 * 1024)
       throw new BadRequestException('El archivo no puede superar 5MB');
+  }
+
+  private validateReferenciaImagen(file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('No se recibió ningún archivo');
+    const allowed = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp', 'image/gif'];
+    if (!allowed.includes(file.mimetype))
+      throw new BadRequestException('Las referencias solo pueden ser imágenes (JPG, PNG, WebP o GIF)');
+    if (file.size > 5 * 1024 * 1024)
+      throw new BadRequestException('Cada imagen no puede superar 5MB');
   }
 }
 

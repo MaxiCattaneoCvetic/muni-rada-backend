@@ -1,4 +1,5 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString, IsBoolean } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString, IsBoolean, IsUUID } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AreaMunicipal } from './pedido.entity';
 
@@ -20,6 +21,11 @@ export class CreatePedidoDto {
   area: AreaMunicipal;
 
   @ApiPropertyOptional({ default: false })
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') return undefined;
+    if (value === true || value === 'true' || value === '1') return true;
+    return false;
+  })
   @IsBoolean() @IsOptional()
   urgente?: boolean;
 }
@@ -37,8 +43,10 @@ export class RechazarPedidoDto {
 }
 
 export class FirmarPresupuestoDto {
-  // La firma se toma del perfil del usuario (firmaUrl)
-  // Solo se requiere confirmación
+  @ApiProperty({ description: 'ID del presupuesto que Secretaría autoriza con su firma' })
+  @IsUUID()
+  presupuestoId: string;
+
   @ApiPropertyOptional()
   @IsString() @IsOptional()
   nota?: string;
@@ -49,6 +57,9 @@ export class ConfirmarRecepcionDto {
   @IsString() @IsOptional()
   nota?: string;
 }
+
+/** Body vacío; el archivo va en multipart `factura`. */
+export class SubirFacturaDto {}
 
 export class PedidoFilterDto {
   @ApiPropertyOptional()

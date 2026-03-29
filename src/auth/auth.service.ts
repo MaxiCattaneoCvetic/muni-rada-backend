@@ -47,6 +47,8 @@ export class AuthService {
         rol: user.rol,
         mustChangePassword: user.mustChangePassword,
         firmaUrl: user.firmaUrl,
+        areaAsignada: user.areaAsignada ?? null,
+        areasPedidoPermitidas: user.areasPedidoPermitidas ?? null,
       },
     };
   }

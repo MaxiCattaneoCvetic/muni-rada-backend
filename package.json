@@ -3,11 +3,13 @@
   "version": "1.0.0",
   "description": "Municipalidad de Rada Tilly - Sistema de Suministros API",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/main",
-    "start:dev": "ts-node src/main.ts",
-    "dev": "ts-node src/main.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:dev": "ts-node --files src/main.ts",
+    "dev": "ts-node --files src/main.ts",
     "seed": "ts-node scripts/seed-dev.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
     "test:demo": "node scripts/test-demo-auth.mjs"
   },
   "dependencies": {
@@ -34,13 +36,17 @@
     "uuid": "^9.0.0"
   },
   "devDependencies": {
+    "@nestjs/testing": "^10.4.22",
     "@types/bcryptjs": "^2.4.6",
     "@types/express": "^4.17.21",
+    "@types/jest": "^30.0.0",
     "@types/multer": "^2.1.0",
     "@types/node": "^20.0.0",
     "@types/passport-jwt": "^4.0.0",
     "@types/passport-local": "^1.0.38",
     "@types/uuid": "^9.0.0",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.6",
     "ts-node": "^10.9.1",
     "typescript": "^5.1.3"
   }

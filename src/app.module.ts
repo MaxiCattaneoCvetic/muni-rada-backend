@@ -8,7 +8,20 @@ import { PresupuestosModule } from './presupuestos/presupuestos.module';
 import { SelladosModule } from './sellados/sellados.module';
 import { PagosModule } from './pagos/pagos.module';
 import { ArchivosModule } from './archivos/archivos.module';
-import { ConfigSystemModule } from './config/config.module';
+import { ConfigSystemModule, SistemaConfig } from './config/config.module';
+import { ProveedoresModule } from './proveedores/proveedores.module';
+import { User } from './users/user.entity';
+import { Pedido } from './pedidos/pedido.entity';
+import { Presupuesto } from './presupuestos/presupuesto.entity';
+import { Proveedor } from './proveedores/proveedor.entity';
+import { ProveedorComentario } from './proveedores/proveedor-comentario.entity';
+import { Pago } from './pagos/pagos.module';
+import { Sellado } from './sellados/sellados.module';
+
+/** Entidades registradas en el DataSource global (el glob *.entity.ts no incluye clases definidas en *.module.ts). */
+const TYPEORM_ENTITIES = [
+  User, Pedido, Presupuesto, Proveedor, ProveedorComentario, Pago, Sellado, SistemaConfig,
+];
 
 @Module({
   imports: [
@@ -26,7 +39,7 @@ import { ConfigSystemModule } from './config/config.module';
         password: config.get('DATABASE_PASSWORD'),
         database: config.get('DATABASE_NAME'),
         ssl: config.get('DATABASE_SSL') === 'true' ? { rejectUnauthorized: false } : false,
-        entities: [__dirname + '/**/*.entity{.ts,.js}'],
+        entities: TYPEORM_ENTITIES,
         synchronize: config.get('NODE_ENV') !== 'production', // auto-migrate en dev
         logging: config.get('NODE_ENV') === 'development',
       }),
@@ -42,6 +55,7 @@ import { ConfigSystemModule } from './config/config.module';
     PagosModule,
     ArchivosModule,
     ConfigSystemModule,
+    ProveedoresModule,
   ],
 })
 export class AppModule {}

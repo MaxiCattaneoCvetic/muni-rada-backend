@@ -1,12 +1,13 @@
 import {
   Controller, Get, Post, Put, Patch, Body, Param, Query,
-  UseGuards, Request,
+  UseGuards, Request, UseInterceptors, UploadedFile, UploadedFiles,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PedidosService } from './pedidos.service';
 import {
   CreatePedidoDto, AprobarPedidoDto, RechazarPedidoDto,
-  FirmarPresupuestoDto, ConfirmarRecepcionDto, PedidoFilterDto,
+  FirmarPresupuestoDto, ConfirmarRecepcionDto, PedidoFilterDto, SubirFacturaDto,
 } from './pedidos.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -50,9 +51,15 @@ export class PedidosController {
 
   // ── CREAR ──
   @Post()
-  @ApiOperation({ summary: 'Crear nuevo pedido' })
-  create(@Body() dto: CreatePedidoDto, @Request() req) {
-    return this.service.create(dto, req.user);
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FilesInterceptor('referencias', 8))
+  @ApiOperation({ summary: 'Crear nuevo pedido (campos de formulario + imágenes de referencia opcionales)' })
+  create(
+    @Body() dto: CreatePedidoDto,
+    @Request() req,
+    @UploadedFiles() referencias?: Express.Multer.File[],
+  ) {
+    return this.service.create(dto, req.user, referencias ?? []);
   }
 
   // ── ETAPA 1→2: APROBAR ──
@@ -104,6 +111,21 @@ export class PedidosController {
     return this.service.firmar(id, dto, req.user);
   }
 
+  // ── ETAPA 4→5: SUBIR FACTURA (Compras) ──
+  @Patch(':id/subir-factura')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.COMPRAS, UserRole.ADMIN)
+  @UseInterceptors(FileInterceptor('factura'))
+  @ApiOperation({ summary: 'Subir factura del proveedor y enviar a Tesorería (Compras)' })
+  subirFactura(
+    @Param('id') id: string,
+    @Body() _dto: SubirFacturaDto,
+    @Request() req,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.service.subirFactura(id, file, req.user);
+  }
+
   // ── ETAPA 3→2: RECHAZAR PRESUPUESTO ──
   @Patch(':id/rechazar-presupuesto')
   @UseGuards(RolesGuard)
@@ -113,7 +135,7 @@ export class PedidosController {
     return this.service.rechazarPresupuesto(id, dto, req.user);
   }
 
-  // ── ETAPA 5→6: CONFIRMAR RECEPCIÓN ──
+  // ── ETAPA 6→7: CONFIRMAR RECEPCIÓN ──
   @Patch(':id/confirmar-recepcion')
   @UseGuards(RolesGuard)
   @Roles(UserRole.ADMIN)
