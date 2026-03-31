@@ -36,7 +36,10 @@ function loadEnv() {
     ) {
       val = val.slice(1, -1);
     }
-    process.env[key] = val;
+    // Entorno del proceso tiene prioridad sobre .env (p. ej. Railway / CI)
+    if (process.env[key] === undefined) {
+      process.env[key] = val;
+    }
   }
 }
 
