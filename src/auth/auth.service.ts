@@ -58,9 +58,10 @@ export class AuthService {
     return this.toAuthResponse(user);
   }
 
-  /** Sin contraseña; solo si DEMO_MODE=true en el servidor. */
+  /** Sin contraseña; solo si DEMO_MODE está habilitado en el servidor. */
   async demoLogin(rol: UserRole) {
-    if (this.configService.get<string>('DEMO_MODE') !== 'true') {
+    const demoFlag = (this.configService.get<string>('DEMO_MODE') ?? '').trim().toLowerCase();
+    if (!['true', '1', 'yes'].includes(demoFlag)) {
       throw new ForbiddenException('El modo demo no está habilitado en el servidor.');
     }
     const email = DEMO_EMAIL_BY_ROLE[rol];
