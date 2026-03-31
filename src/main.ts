@@ -4,12 +4,23 @@ import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
+function resolveCorsOrigins(): string | string[] {
+  const raw = process.env.FRONTEND_URL ?? process.env.CORS_ORIGINS;
+  const fallback = 'http://localhost:5173';
+  if (!raw?.trim()) return fallback;
+  const list = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (list.length === 0) return fallback;
+  return list.length === 1 ? list[0]! : list;
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // CORS
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: resolveCorsOrigins(),
     credentials: true,
   });
 
