@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TypeOrmModule, TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { PedidosModule } from './pedidos/pedidos.module';
@@ -31,18 +31,38 @@ const TYPEORM_ENTITIES = [
     // Database
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (config: ConfigService) => ({
-        type: 'postgres',
-        host: config.get('DATABASE_HOST'),
-        port: parseInt(config.get('DATABASE_PORT', '5432')),
-        username: config.get('DATABASE_USER'),
-        password: config.get('DATABASE_PASSWORD'),
-        database: config.get('DATABASE_NAME'),
-        ssl: config.get('DATABASE_SSL') === 'true' ? { rejectUnauthorized: false } : false,
-        entities: TYPEORM_ENTITIES,
-        synchronize: config.get('NODE_ENV') !== 'production', // auto-migrate en dev
-        logging: config.get('NODE_ENV') === 'development',
-      }),
+      useFactory: (config: ConfigService): TypeOrmModuleOptions => {
+        const databaseUrl = config.get<string>('DATABASE_URL')?.trim();
+        const ssl =
+          config.get<string>('DATABASE_SSL') === 'true'
+            ? { rejectUnauthorized: false as const }
+            : false;
+        const synchronize = config.get<string>('NODE_ENV') !== 'production';
+        const logging = config.get<string>('NODE_ENV') === 'development';
+
+        if (databaseUrl) {
+          return {
+            type: 'postgres',
+            url: databaseUrl,
+            entities: TYPEORM_ENTITIES,
+            synchronize,
+            logging,
+            ssl,
+          };
+        }
+        return {
+          type: 'postgres',
+          host: config.get<string>('DATABASE_HOST') ?? 'localhost',
+          port: parseInt(config.get<string>('DATABASE_PORT') ?? '5432', 10),
+          username: config.get<string>('DATABASE_USER') ?? 'postgres',
+          password: config.get<string>('DATABASE_PASSWORD') ?? '',
+          database: config.get<string>('DATABASE_NAME') ?? 'suministros',
+          entities: TYPEORM_ENTITIES,
+          synchronize,
+          logging,
+          ssl,
+        };
+      },
       inject: [ConfigService],
     }),
 

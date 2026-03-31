@@ -19,7 +19,7 @@ import { DEMO_EMAIL_BY_ROLE } from '../src/auth/demo.constants';
 function loadEnv() {
   const envPath = path.join(__dirname, '..', '.env');
   if (!fs.existsSync(envPath)) {
-    console.error('Falta backend/.env (copiá .env.example y completá DATABASE_*).');
+    console.error('Falta backend/.env (copiá .env.example y definí DATABASE_URL o DATABASE_*).');
     process.exit(1);
   }
   const content = fs.readFileSync(envPath, 'utf8');
@@ -60,21 +60,34 @@ const DEMO_PROFILES: Record<
 async function main() {
   loadEnv();
 
-  const ds = new DataSource({
-    type: 'postgres',
-    host: process.env.DATABASE_HOST || 'localhost',
-    port: parseInt(process.env.DATABASE_PORT || '5432', 10),
-    username: process.env.DATABASE_USER || 'postgres',
-    password: process.env.DATABASE_PASSWORD,
-    database: process.env.DATABASE_NAME || 'suministros',
-    ssl:
-      process.env.DATABASE_SSL === 'true'
-        ? { rejectUnauthorized: false }
-        : false,
-    entities: [User, Pedido, Presupuesto, Proveedor, Pago, Sellado, SistemaConfig],
-    synchronize: true,
-    logging: false,
-  });
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  const ssl =
+    process.env.DATABASE_SSL === 'true'
+      ? { rejectUnauthorized: false as const }
+      : false;
+  const ds = new DataSource(
+    databaseUrl
+      ? {
+          type: 'postgres',
+          url: databaseUrl,
+          ssl,
+          entities: [User, Pedido, Presupuesto, Proveedor, Pago, Sellado, SistemaConfig],
+          synchronize: true,
+          logging: false,
+        }
+      : {
+          type: 'postgres',
+          host: process.env.DATABASE_HOST || 'localhost',
+          port: parseInt(process.env.DATABASE_PORT || '5432', 10),
+          username: process.env.DATABASE_USER || 'postgres',
+          password: process.env.DATABASE_PASSWORD,
+          database: process.env.DATABASE_NAME || 'suministros',
+          ssl,
+          entities: [User, Pedido, Presupuesto, Proveedor, Pago, Sellado, SistemaConfig],
+          synchronize: true,
+          logging: false,
+        },
+  );
 
   try {
     await ds.initialize();
