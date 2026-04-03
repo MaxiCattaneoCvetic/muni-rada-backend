@@ -42,6 +42,10 @@ export class Pedido {
   @Column({ type: 'enum', enum: AreaMunicipal })
   area: AreaMunicipal;
 
+  /** Área destino del suministro (puede diferir del área solicitante). */
+  @Column({ type: 'enum', enum: AreaMunicipal, nullable: true, name: 'area_destino' })
+  areaDestino: AreaMunicipal | null;
+
   @Column({ default: false })
   urgente: boolean;
 
@@ -93,6 +97,16 @@ export class Pedido {
   @Column({ nullable: true, name: 'firmado_en', type: 'timestamp' })
   firmadoEn: Date;
 
+  // Orden de compra generada al firmar
+  @Column({ nullable: true, name: 'orden_compra_numero' })
+  ordenCompraNumero: string;
+
+  @Column({ nullable: true, name: 'orden_compra_url', type: 'text' })
+  ordenCompraUrl: string;
+
+  @Column({ nullable: true, name: 'orden_compra_path' })
+  ordenCompraPath: string;
+
   // Factura del proveedor (Compras, antes de Tesorería)
   @Column({ nullable: true, name: 'factura_compras_url', type: 'text' })
   facturaComprasUrl: string;
@@ -107,6 +121,9 @@ export class Pedido {
   @Column({ nullable: true, name: 'factura_subida_en', type: 'timestamp' })
   facturaSubidaEn: Date;
 
+  @Column({ nullable: true, name: 'fecha_limite_pago', type: 'date' })
+  fechaLimitePago: Date;
+
   // Quién confirmó recepción (Admin)
   @ManyToOne(() => User, { nullable: true })
   @JoinColumn({ name: 'recepcion_confirmada_por_id' })
@@ -114,6 +131,10 @@ export class Pedido {
 
   @Column({ nullable: true, name: 'recepcion_en', type: 'timestamp' })
   recepcionEn: Date;
+
+  /** Fecha en que el pedido fue archivado (stage 7 ó 8 tras 3 días). NULL = activo. */
+  @Column({ name: 'archived_at', type: 'timestamp', nullable: true, default: null })
+  archivedAt: Date | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

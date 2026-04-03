@@ -1,30 +1,39 @@
 import {
-  Injectable, NotFoundException, BadRequestException, ForbiddenException,
+  Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, FindManyOptions } from 'typeorm';
+import { Repository, Like, FindManyOptions, IsNull } from 'typeorm';
+import { Cron } from '@nestjs/schedule';
 import { Pedido, PedidoStage } from './pedido.entity';
+import { PedidoComentario } from './pedido-comentario.entity';
 import {
   CreatePedidoDto, AprobarPedidoDto, RechazarPedidoDto,
   FirmarPresupuestoDto, ConfirmarRecepcionDto, PedidoFilterDto,
 } from './pedidos.dto';
 import { User, UserRole } from '../users/user.entity';
+import { Presupuesto } from '../presupuestos/presupuesto.entity';
 import { PresupuestosService } from '../presupuestos/presupuestos.service';
 import { ConfigSystemService } from '../config/config.service';
 import { ArchivosService } from '../archivos/archivos.service';
 import { UsersService } from '../users/users.service';
+import { OrdenCompraService } from '../orden-compra/orden-compra.service';
 import { userMayRequestPedidoForArea } from '../common/enums/area-municipal.enum';
 import * as crypto from 'crypto';
 
 @Injectable()
 export class PedidosService {
+  private readonly logger = new Logger(PedidosService.name);
+
   constructor(
     @InjectRepository(Pedido)
     private pedidosRepo: Repository<Pedido>,
+    @InjectRepository(PedidoComentario)
+    private comentariosRepo: Repository<PedidoComentario>,
     private presupuestosService: PresupuestosService,
     private configService: ConfigSystemService,
     private archivosService: ArchivosService,
     private usersService: UsersService,
+    private ordenCompraService: OrdenCompraService,
   ) {}
 
   // ── HELPERS ──────────────────────────────────────────────────────────
@@ -54,6 +63,8 @@ export class PedidosService {
     if (filter.stage !== undefined) where.stage = filter.stage;
     if (filter.area) where.area = filter.area;
     if (filter.urgente !== undefined) where.urgente = filter.urgente;
+    // Exclude archived pedidos by default; pass includeArchived=true to see them
+    if (!filter.includeArchived) where.archivedAt = IsNull();
 
     const options: FindManyOptions<Pedido> = {
       where,
@@ -63,6 +74,39 @@ export class PedidosService {
     const list = await this.pedidosRepo.find(options);
     await this.attachPresupuestosCargados(list);
     return list;
+  }
+
+  // ── ARCHIVAL ─────────────────────────────────────────────────────────
+
+  /** Archiva pedidos en stage 7 u 8 cuyo updated_at supere los 3 días. Corre diariamente a las 03:00. */
+  @Cron('0 3 * * *')
+  async archivarAntiguos(): Promise<void> {
+    const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    const result = await this.pedidosRepo
+      .createQueryBuilder()
+      .update(Pedido)
+      .set({ archivedAt: () => 'NOW()' })
+      .where('stage IN (:...stages)', { stages: [PedidoStage.SUMINISTROS_LISTOS, PedidoStage.RECHAZADO] })
+      .andWhere('archived_at IS NULL')
+      .andWhere('updated_at < :cutoff', { cutoff })
+      .execute();
+    if (result.affected) {
+      this.logger.log(`Archivados ${result.affected} pedido(s) en etapa terminal (> 3 días).`);
+    }
+  }
+
+  async archivar(id: string): Promise<Pedido> {
+    const pedido = await this.findById(id);
+    if (pedido.archivedAt) throw new BadRequestException('El pedido ya está archivado.');
+    pedido.archivedAt = new Date();
+    return this.pedidosRepo.save(pedido);
+  }
+
+  async desarchivar(id: string): Promise<Pedido> {
+    const pedido = await this.pedidosRepo.findOne({ where: { id } });
+    if (!pedido) throw new NotFoundException(`Pedido ${id} no encontrado`);
+    pedido.archivedAt = null;
+    return this.pedidosRepo.save(pedido);
   }
 
   /** Cantidad de presupuestos por pedido (para UI / Kanban). No persiste en DB. */
@@ -272,9 +316,30 @@ export class PedidosService {
     pedido.firmaUrlUsada = user.firmaUrl;
     pedido.firmadoEn = new Date();
     pedido.bloqueado = requiereSellado;
-    // Hash simulado para la demo (en producción usar firma real con cert)
     pedido.firmaHash = crypto.randomBytes(8).toString('hex').toUpperCase();
-    return this.pedidosRepo.save(pedido);
+
+    const saved = await this.pedidosRepo.save(pedido);
+
+    // Generate Orden de Compra PDF asynchronously (non-blocking for the response)
+    this.generateOrdenCompra(saved, presup, user).catch((err) =>
+      this.logger.error(`Error generando OC para pedido ${id}: ${err.message}`),
+    );
+
+    return saved;
+  }
+
+  private async generateOrdenCompra(pedido: Pedido, presupuesto: Presupuesto, firmante: User): Promise<void> {
+    const result = await this.ordenCompraService.generateAndUpload({
+      pedido,
+      presupuesto,
+      firmante,
+    });
+
+    pedido.ordenCompraNumero = result.numero;
+    pedido.ordenCompraUrl = result.url;
+    pedido.ordenCompraPath = result.path;
+    await this.pedidosRepo.save(pedido);
+    this.logger.log(`Orden de Compra ${result.numero} generada para pedido ${pedido.numero}`);
   }
 
   // Etapa 3 → 2: Secretaría rechaza presupuesto (vuelve a Compras)
@@ -292,6 +357,7 @@ export class PedidosService {
     id: string,
     file: Express.Multer.File | undefined,
     user: User,
+    fechaLimitePago?: string,
   ): Promise<Pedido> {
     const pedido = await this.findById(id);
     this.assertNotRechazado(pedido);
@@ -299,11 +365,21 @@ export class PedidosService {
     if (!file)
       throw new BadRequestException('Debés adjuntar la factura en PDF');
 
-    const { url, path } = await this.archivosService.uploadFacturaCompras(file, id);
+    let url: string | null = null;
+    let path: string | null = null;
+
+    if (this.archivosService.isStorageAvailable()) {
+      const result = await this.archivosService.uploadFacturaCompras(file, id);
+      url = result.url;
+      path = result.path;
+    }
+    // If storage is not configured (local dev), skip upload and continue with null URL
+
     pedido.facturaComprasUrl = url;
     pedido.facturaComprasPath = path;
     pedido.facturaSubidaPor = user;
     pedido.facturaSubidaEn = new Date();
+    pedido.fechaLimitePago = fechaLimitePago ? new Date(fechaLimitePago) : null;
     pedido.stage = PedidoStage.GESTION_PAGOS;
     return this.pedidosRepo.save(pedido);
   }
@@ -336,5 +412,30 @@ export class PedidosService {
     pedido.recepcionConfirmadaPor = user;
     pedido.recepcionEn = new Date();
     return this.pedidosRepo.save(pedido);
+  }
+
+  // ── COMENTARIOS ──────────────────────────────────────────────────────
+
+  async listComentarios(pedidoId: string): Promise<PedidoComentario[]> {
+    await this.findById(pedidoId);
+    return this.comentariosRepo.find({
+      where: { pedidoId },
+      order: { createdAt: 'ASC' },
+      relations: ['usuario'],
+    });
+  }
+
+  async addComentario(pedidoId: string, texto: string, user: User): Promise<PedidoComentario> {
+    await this.findById(pedidoId);
+    const row = this.comentariosRepo.create({
+      pedidoId,
+      usuarioId: user.id,
+      texto: texto.trim(),
+    });
+    const saved = await this.comentariosRepo.save(row);
+    return this.comentariosRepo.findOneOrFail({
+      where: { id: saved.id },
+      relations: ['usuario'],
+    });
   }
 }

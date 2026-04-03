@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Put, Patch, Body, Param, Query,
-  UseGuards, Request, UseInterceptors, UploadedFile, UploadedFiles,
+  UseGuards, Request, UseInterceptors, UploadedFile, UploadedFiles, ParseUUIDPipe,
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -8,6 +8,7 @@ import { PedidosService } from './pedidos.service';
 import {
   CreatePedidoDto, AprobarPedidoDto, RechazarPedidoDto,
   FirmarPresupuestoDto, ConfirmarRecepcionDto, PedidoFilterDto, SubirFacturaDto,
+  CreatePedidoComentarioDto,
 } from './pedidos.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -119,11 +120,11 @@ export class PedidosController {
   @ApiOperation({ summary: 'Subir factura del proveedor y enviar a Tesorería (Compras)' })
   subirFactura(
     @Param('id') id: string,
-    @Body() _dto: SubirFacturaDto,
+    @Body() dto: SubirFacturaDto,
     @Request() req,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    return this.service.subirFactura(id, file, req.user);
+    return this.service.subirFactura(id, file, req.user, dto.fechaLimitePago);
   }
 
   // ── ETAPA 3→2: RECHAZAR PRESUPUESTO ──
@@ -142,5 +143,51 @@ export class PedidosController {
   @ApiOperation({ summary: 'Confirmar recepción de suministros (Admin)' })
   confirmarRecepcion(@Param('id') id: string, @Body() dto: ConfirmarRecepcionDto, @Request() req) {
     return this.service.confirmarRecepcion(id, dto, req.user);
+  }
+
+  // ── ARCHIVAL (Admin) ──
+  @Patch(':id/archivar')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Archivar manualmente un pedido (Admin)' })
+  archivar(@Param('id') id: string) {
+    return this.service.archivar(id);
+  }
+
+  @Patch(':id/desarchivar')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Desarchivar un pedido (Admin)' })
+  desarchivar(@Param('id') id: string) {
+    return this.service.desarchivar(id);
+  }
+
+  // ── COMENTARIOS ──
+  @Get(':id/comentarios')
+  @ApiOperation({ summary: 'Listar comentarios del pedido' })
+  listComentarios(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.listComentarios(id);
+  }
+
+  @Post(':id/comentarios')
+  @ApiOperation({ summary: 'Agregar comentario al pedido' })
+  addComentario(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreatePedidoComentarioDto,
+    @Request() req,
+  ) {
+    return this.service.addComentario(id, dto.texto, req.user);
+  }
+
+  // ── ORDEN DE COMPRA PDF ──
+  @Get(':id/orden-compra')
+  @ApiOperation({ summary: 'Obtener URL de la Orden de Compra PDF' })
+  async getOrdenCompra(@Param('id') id: string) {
+    const pedido = await this.service.findById(id);
+    return {
+      numero: pedido.ordenCompraNumero,
+      url: pedido.ordenCompraUrl,
+      available: !!pedido.ordenCompraUrl,
+    };
   }
 }

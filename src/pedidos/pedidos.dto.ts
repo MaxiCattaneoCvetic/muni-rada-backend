@@ -1,4 +1,4 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString, IsBoolean, IsUUID } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString, IsBoolean, IsUUID, IsDateString } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AreaMunicipal } from './pedido.entity';
@@ -19,6 +19,10 @@ export class CreatePedidoDto {
   @ApiProperty({ enum: AreaMunicipal })
   @IsEnum(AreaMunicipal)
   area: AreaMunicipal;
+
+  @ApiPropertyOptional({ enum: AreaMunicipal, description: 'Área destino del suministro (si difiere del área solicitante)' })
+  @IsEnum(AreaMunicipal) @IsOptional()
+  areaDestino?: AreaMunicipal;
 
   @ApiPropertyOptional({ default: false })
   @Transform(({ value }) => {
@@ -58,8 +62,19 @@ export class ConfirmarRecepcionDto {
   nota?: string;
 }
 
-/** Body vacío; el archivo va en multipart `factura`. */
-export class SubirFacturaDto {}
+/** Metadatos de la factura; el archivo PDF va en multipart `factura`. */
+export class SubirFacturaDto {
+  @ApiPropertyOptional({ example: '2026-05-15', description: 'Fecha límite para realizar el pago (YYYY-MM-DD)' })
+  @IsDateString() @IsOptional()
+  fechaLimitePago?: string;
+}
+
+export class CreatePedidoComentarioDto {
+  @ApiProperty({ example: 'El proveedor confirmó entrega para el viernes.' })
+  @IsString()
+  @IsNotEmpty()
+  texto: string;
+}
 
 export class PedidoFilterDto {
   @ApiPropertyOptional()
@@ -77,4 +92,14 @@ export class PedidoFilterDto {
   @ApiPropertyOptional()
   @IsOptional()
   search?: string;
+
+  @ApiPropertyOptional({ description: 'Incluir pedidos archivados en los resultados. Por defecto false.' })
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => {
+    if (value === true || value === 'true' || value === '1') return true;
+    if (value === false || value === 'false' || value === '0') return false;
+    return undefined;
+  })
+  includeArchived?: boolean;
 }

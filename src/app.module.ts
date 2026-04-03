@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule, TypeOrmModuleOptions } from '@nestjs/typeorm';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { PedidosModule } from './pedidos/pedidos.module';
@@ -10,6 +11,8 @@ import { PagosModule } from './pagos/pagos.module';
 import { ArchivosModule } from './archivos/archivos.module';
 import { ConfigSystemModule, SistemaConfig } from './config/config.module';
 import { ProveedoresModule } from './proveedores/proveedores.module';
+import { FinanzasModule } from './finanzas/finanzas.module';
+import { ReportesModule, Reporte, ReporteMensaje } from './reportes/reportes.module';
 import { User } from './users/user.entity';
 import { Pedido } from './pedidos/pedido.entity';
 import { Presupuesto } from './presupuestos/presupuesto.entity';
@@ -20,7 +23,7 @@ import { Sellado } from './sellados/sellados.module';
 
 /** Entidades registradas en el DataSource global (el glob *.entity.ts no incluye clases definidas en *.module.ts). */
 const TYPEORM_ENTITIES = [
-  User, Pedido, Presupuesto, Proveedor, ProveedorComentario, Pago, Sellado, SistemaConfig,
+  User, Pedido, Presupuesto, Proveedor, ProveedorComentario, Pago, Sellado, SistemaConfig, Reporte, ReporteMensaje,
 ];
 
 @Module({
@@ -66,6 +69,9 @@ const TYPEORM_ENTITIES = [
       inject: [ConfigService],
     }),
 
+    // Scheduled tasks
+    ScheduleModule.forRoot(),
+
     // Feature modules
     AuthModule,
     UsersModule,
@@ -76,6 +82,8 @@ const TYPEORM_ENTITIES = [
     ArchivosModule,
     ConfigSystemModule,
     ProveedoresModule,
+    FinanzasModule,
+    ReportesModule,
   ],
 })
 export class AppModule {}

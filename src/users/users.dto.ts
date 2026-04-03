@@ -70,6 +70,12 @@ export class UpdateUserDto {
   @IsArray()
   @IsEnum(AreaMunicipal, { each: true })
   areasPedidoPermitidas?: AreaMunicipal[] | null;
+
+  /** URL de firma (admin can set directly, e.g. for testing environments without Supabase). */
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  firmaUrl?: string;
 }
 
 export class ChangePasswordDto {
