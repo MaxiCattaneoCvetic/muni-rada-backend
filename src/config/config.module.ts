@@ -20,7 +20,7 @@ export class SistemaConfig {
   @Column({ type: 'decimal', precision: 12, scale: 2, name: 'umbral_sellado', default: 350000 })
   umbralSellado: number;
 
-  @Column({ name: 'min_presupuestos', default: 3 })
+  @Column({ name: 'min_presupuestos', default: 1 })
   minPresupuestos: number;
 
   /** Máximo de cotizaciones que se pueden cargar por pedido (tope duro). */
@@ -47,7 +47,7 @@ export class SistemaConfig {
 // ── DTO ──────────────────────────────────────────────────────────────
 export class UpdateConfigDto {
   @ApiPropertyOptional({ example: 350000 }) @IsNumber() @Min(0) @IsOptional() umbralSellado?: number;
-  @ApiPropertyOptional({ example: 3 }) @IsNumber() @Min(1) @Max(5) @IsOptional() minPresupuestos?: number;
+  @ApiPropertyOptional({ example: 1, description: 'Mínimo de presupuestos (deprecated, siempre es 1)' }) @IsNumber() @Min(1) @Max(5) @IsOptional() minPresupuestos?: number;
   @ApiPropertyOptional({ example: 5 }) @IsNumber() @Min(1) @Max(5) @IsOptional() maxPresupuestos?: number;
   @ApiPropertyOptional() @IsBoolean() @IsOptional() bloquearPagoSinSellado?: boolean;
   @ApiPropertyOptional() @IsOptional() nombreMunicipalidad?: string;
@@ -93,9 +93,6 @@ export class ConfigSystemService {
   async update(dto: UpdateConfigDto, user: User): Promise<SistemaConfig> {
     const cfg = await this.getConfig();
     Object.assign(cfg, dto);
-    if (cfg.minPresupuestos > cfg.maxPresupuestos) {
-      cfg.minPresupuestos = cfg.maxPresupuestos;
-    }
     cfg.modificadoPor = user;
     this.config = null; // invalidate cache
     return this.repo.save(cfg);

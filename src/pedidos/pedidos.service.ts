@@ -268,9 +268,8 @@ export class PedidosService {
     this.assertStage(pedido, PedidoStage.PRESUPUESTOS, 'El pedido debe estar en etapa de Presupuestos');
 
     const presupuestos = await this.presupuestosService.findByPedido(id);
-    const minPresup = await this.configService.getMinPresupuestos();
-    if (presupuestos.length < minPresup)
-      throw new BadRequestException(`Se necesitan al menos ${minPresup} presupuestos`);
+    if (presupuestos.length < 1)
+      throw new BadRequestException('Se necesita al menos 1 presupuesto');
 
     // Asignar proveedor de menor monto automáticamente
     const mejor = presupuestos.reduce((a, b) => a.monto < b.monto ? a : b);
