@@ -49,6 +49,22 @@ export class FinanzasFilterDto {
   @IsString()
   @IsOptional()
   proveedor?: string;
+
+  @ApiPropertyOptional({ example: 1, minimum: 1, maximum: 12 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  @IsOptional()
+  monthStart?: number;
+
+  @ApiPropertyOptional({ example: 12, minimum: 1, maximum: 12 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  @IsOptional()
+  monthEnd?: number;
 }
 
 export interface GastoFinanzasItem {
@@ -70,6 +86,8 @@ export interface FinanzasResumen {
   filters: {
     area: string | null;
     proveedor: string | null;
+    monthStart: number | null;
+    monthEnd: number | null;
   };
   totalGastado: number;
   cantidadPagos: number;
@@ -153,6 +171,8 @@ export class FinanzasService {
       filters: {
         area: filter.area?.trim() || null,
         proveedor: filter.proveedor?.trim() || null,
+        monthStart: filter.monthStart ?? null,
+        monthEnd: filter.monthEnd ?? null,
       },
       totalGastado,
       cantidadPagos: gastos.length,
@@ -181,6 +201,16 @@ export class FinanzasService {
         "COALESCE(NULLIF(TRIM(pedido.proveedorSeleccionado), ''), 'Sin proveedor') = :proveedor",
         { proveedor },
       );
+    }
+
+    const monthStart = filter.monthStart;
+    if (monthStart) {
+      qb.andWhere('EXTRACT(MONTH FROM pago.fechaPago) >= :monthStart', { monthStart });
+    }
+
+    const monthEnd = filter.monthEnd;
+    if (monthEnd) {
+      qb.andWhere('EXTRACT(MONTH FROM pago.fechaPago) <= :monthEnd', { monthEnd });
     }
 
     return qb;
@@ -277,6 +307,8 @@ export class FinanzasController {
   @ApiQuery({ name: 'year', required: false, type: Number })
   @ApiQuery({ name: 'area', required: false, type: String })
   @ApiQuery({ name: 'proveedor', required: false, type: String })
+  @ApiQuery({ name: 'monthStart', required: false, type: Number })
+  @ApiQuery({ name: 'monthEnd', required: false, type: Number })
   getGastos(@Query() filter: FinanzasFilterDto) {
     return this.finanzasService.getGastos(filter);
   }
@@ -286,6 +318,8 @@ export class FinanzasController {
   @ApiQuery({ name: 'year', required: false, type: Number })
   @ApiQuery({ name: 'area', required: false, type: String })
   @ApiQuery({ name: 'proveedor', required: false, type: String })
+  @ApiQuery({ name: 'monthStart', required: false, type: Number })
+  @ApiQuery({ name: 'monthEnd', required: false, type: Number })
   getResumen(@Query() filter: FinanzasFilterDto) {
     return this.finanzasService.getResumen(filter);
   }

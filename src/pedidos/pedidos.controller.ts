@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Put, Patch, Body, Param, Query,
+  Controller, Get, Post, Put, Patch, Delete, Body, Param, Query,
   UseGuards, Request, UseInterceptors, UploadedFile, UploadedFiles, ParseUUIDPipe,
   ValidationPipe,
 } from '@nestjs/common';
@@ -50,6 +50,12 @@ export class PedidosController {
   @ApiOperation({ summary: 'Detalle de un pedido' })
   findOne(@Param('id') id: string) {
     return this.service.findById(id);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Eliminar pedido en aprobación inicial' })
+  remove(@Param('id') id: string, @Request() req) {
+    return this.service.remove(id, req.user);
   }
 
   // ── CREAR ──
@@ -168,8 +174,8 @@ export class PedidosController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Archivar manualmente un pedido (Admin)' })
-  archivar(@Param('id') id: string) {
-    return this.service.archivar(id);
+  archivar(@Param('id') id: string, @Request() req) {
+    return this.service.archivar(id, req.user);
   }
 
   @Patch(':id/desarchivar')
@@ -207,5 +213,12 @@ export class PedidosController {
       url: pedido.ordenCompraUrl,
       available: !!pedido.ordenCompraUrl,
     };
+  }
+
+  // ── AUDIT LOG ──
+  @Get(':id/audit-log')
+  @ApiOperation({ summary: 'Historial de eventos auditables del pedido' })
+  getAuditLog(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.getAuditLog(id);
   }
 }

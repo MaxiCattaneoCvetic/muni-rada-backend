@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Pedido } from './pedido.entity';
 import { PedidoComentario } from './pedido-comentario.entity';
+import { PedidoAuditLog } from './pedido-audit-log.entity';
 import { PedidosService } from './pedidos.service';
 import { PedidosController } from './pedidos.controller';
 import { PresupuestosModule } from '../presupuestos/presupuestos.module';
@@ -12,7 +13,7 @@ import { OrdenCompraModule } from '../orden-compra/orden-compra.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Pedido, PedidoComentario]),
+    TypeOrmModule.forFeature([Pedido, PedidoComentario, PedidoAuditLog]),
     forwardRef(() => PresupuestosModule),
     ConfigSystemModule,
     ArchivosModule,

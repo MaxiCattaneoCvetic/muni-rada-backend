@@ -12,6 +12,7 @@ import { NotFoundException, ForbiddenException, BadRequestException } from '@nes
 import { PedidosService } from '../pedidos.service';
 import { Pedido, PedidoStage } from '../pedido.entity';
 import { PedidoComentario } from '../pedido-comentario.entity';
+import { PedidoAuditLog } from '../pedido-audit-log.entity';
 import { PresupuestosService } from '../../presupuestos/presupuestos.service';
 import { ConfigSystemService } from '../../config/config.service';
 import { ArchivosService } from '../../archivos/archivos.service';
@@ -58,12 +59,21 @@ describe('PedidosService', () => {
     count: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    remove: jest.Mock;
     findOne: jest.Mock;
     find: jest.Mock;
     createQueryBuilder: jest.Mock;
   }>;
+  let auditLogRepo: jest.Mocked<{
+    create: jest.Mock;
+    save: jest.Mock;
+    find: jest.Mock;
+    delete: jest.Mock;
+  }>;
   let usersService: jest.Mocked<Pick<UsersService, 'findById'>>;
-  let archivosService: jest.Mocked<Pick<ArchivosService, 'isStorageAvailable' | 'uploadReferenciaPedido'>>;
+  let archivosService: jest.Mocked<
+    Pick<ArchivosService, 'isStorageAvailable' | 'uploadReferenciaPedido' | 'deleteFile'>
+  >;
 
   beforeEach(async () => {
     // Arrange — repos
@@ -71,6 +81,7 @@ describe('PedidosService', () => {
       count: jest.fn().mockResolvedValue(0),
       create: jest.fn((x) => x),
       save: jest.fn((x) => Promise.resolve({ ...x, id: PEDIDO_ID })),
+      remove: jest.fn((x) => Promise.resolve(x)),
       findOne: jest.fn(),
       find: jest.fn().mockResolvedValue([]),
       createQueryBuilder: jest.fn(() => ({
@@ -86,6 +97,13 @@ describe('PedidosService', () => {
       save: jest.fn((x) => Promise.resolve(x)),
     };
 
+    auditLogRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      create: jest.fn((x) => x),
+      save: jest.fn((x) => Promise.resolve(x)),
+      delete: jest.fn().mockResolvedValue({ affected: 0 }),
+    };
+
     usersService = {
       findById: jest.fn().mockResolvedValue(makeUser()),
     };
@@ -93,6 +111,7 @@ describe('PedidosService', () => {
     archivosService = {
       isStorageAvailable: jest.fn().mockReturnValue(false),
       uploadReferenciaPedido: jest.fn(),
+      deleteFile: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -100,6 +119,7 @@ describe('PedidosService', () => {
         PedidosService,
         { provide: getRepositoryToken(Pedido), useValue: pedidosRepo },
         { provide: getRepositoryToken(PedidoComentario), useValue: comentariosRepo },
+        { provide: getRepositoryToken(PedidoAuditLog), useValue: auditLogRepo },
         { provide: PresupuestosService, useValue: { findByPedido: jest.fn().mockResolvedValue([]) } },
         { provide: ConfigSystemService, useValue: { get: jest.fn() } },
         { provide: ArchivosService, useValue: archivosService },
@@ -220,6 +240,44 @@ describe('PedidosService', () => {
 
       // Act & Assert
       await expect(service.findById('id-inexistente')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('remove()', () => {
+    it('permite eliminar un pedido en aprobación a su creador', async () => {
+      const owner = makeUser({ id: USER_ID, rol: UserRole.COMPRAS });
+      const pedido = makePedido({
+        stage: PedidoStage.APROBACION,
+        creadoPor: owner,
+        referenciasImagenes: [{ url: 'http://local/ref.png', path: 'referencias/ref.png' }],
+      });
+      pedidosRepo.findOne.mockResolvedValue(pedido);
+
+      const result = await service.remove(PEDIDO_ID, owner);
+
+      expect(pedidosRepo.remove).toHaveBeenCalledWith(pedido);
+      expect(auditLogRepo.delete).toHaveBeenCalledWith({ pedidoId: PEDIDO_ID });
+      expect(archivosService.deleteFile).toHaveBeenCalledWith('referencias/ref.png');
+      expect(result).toEqual({ deleted: true, id: PEDIDO_ID });
+    });
+
+    it('rechaza la eliminación si el pedido ya salió de aprobación', async () => {
+      const pedido = makePedido({ stage: PedidoStage.PRESUPUESTOS, creadoPor: makeUser() });
+      pedidosRepo.findOne.mockResolvedValue(pedido);
+
+      await expect(service.remove(PEDIDO_ID, makeUser())).rejects.toThrow(BadRequestException);
+      expect(pedidosRepo.remove).not.toHaveBeenCalled();
+    });
+
+    it('rechaza la eliminación si el usuario no es owner, Secretaría, Admin ni Sistemas', async () => {
+      const owner = makeUser({ id: 'owner-id', rol: UserRole.COMPRAS });
+      const pedido = makePedido({ stage: PedidoStage.APROBACION, creadoPor: owner });
+      pedidosRepo.findOne.mockResolvedValue(pedido);
+
+      await expect(
+        service.remove(PEDIDO_ID, makeUser({ id: 'otro-id', rol: UserRole.COMPRAS })),
+      ).rejects.toThrow(ForbiddenException);
+      expect(pedidosRepo.remove).not.toHaveBeenCalled();
     });
   });
 });

@@ -132,6 +132,13 @@ export class Pedido {
   @Column({ nullable: true, name: 'recepcion_en', type: 'timestamp' })
   recepcionEn: Date;
 
+  @Column({ nullable: true, type: 'text', name: 'nota_recepcion' })
+  notaRecepcion: string;
+
+  /** Área que recibió físicamente el suministro (puede diferir del área solicitante). */
+  @Column({ nullable: true, name: 'area_recepcion' })
+  areaRecepcion: string;
+
   /** Fecha en que el pedido fue archivado (stage 7 ó 8 tras 3 días). NULL = activo. */
   @Column({ name: 'archived_at', type: 'timestamp', nullable: true, default: null })
   archivedAt: Date | null;

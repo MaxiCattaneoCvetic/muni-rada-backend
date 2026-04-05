@@ -64,6 +64,10 @@ export class ConfirmarRecepcionDto {
   @ApiPropertyOptional()
   @IsString() @IsOptional()
   nota?: string;
+
+  @ApiPropertyOptional({ description: 'Área que recibió físicamente el suministro' })
+  @IsString() @IsOptional()
+  areaRecepcion?: string;
 }
 
 /** Metadatos de la factura; el archivo PDF va en multipart `factura`. */

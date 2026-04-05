@@ -2,10 +2,11 @@ import {
   Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, FindManyOptions, IsNull } from 'typeorm';
+import { Repository, FindManyOptions, IsNull } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
 import { Pedido, PedidoStage } from './pedido.entity';
 import { PedidoComentario } from './pedido-comentario.entity';
+import { PedidoAuditLog, PedidoAuditEvento } from './pedido-audit-log.entity';
 import {
   CreatePedidoDto, AprobarPedidoDto, RechazarPedidoDto,
   FirmarPresupuestoDto, ConfirmarRecepcionDto, PedidoFilterDto,
@@ -17,7 +18,7 @@ import { ConfigSystemService } from '../config/config.service';
 import { ArchivosService } from '../archivos/archivos.service';
 import { UsersService } from '../users/users.service';
 import { OrdenCompraService } from '../orden-compra/orden-compra.service';
-import { userMayRequestPedidoForArea } from '../common/enums/area-municipal.enum';
+import { AreaMunicipal, userMayRequestPedidoForArea } from '../common/enums/area-municipal.enum';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -29,12 +30,51 @@ export class PedidosService {
     private pedidosRepo: Repository<Pedido>,
     @InjectRepository(PedidoComentario)
     private comentariosRepo: Repository<PedidoComentario>,
+    @InjectRepository(PedidoAuditLog)
+    private auditLogRepo: Repository<PedidoAuditLog>,
     private presupuestosService: PresupuestosService,
     private configService: ConfigSystemService,
     private archivosService: ArchivosService,
     private usersService: UsersService,
     private ordenCompraService: OrdenCompraService,
   ) {}
+
+  // ── AUDIT LOG ─────────────────────────────────────────────────────────
+
+  private async insertAuditLog(opts: {
+    pedidoId: string;
+    evento: PedidoAuditEvento;
+    usuario?: User | null;
+    area?: string | null;
+    nota?: string | null;
+    stageAnterior?: PedidoStage | null;
+    stageNuevo?: PedidoStage | null;
+    metadata?: Record<string, unknown> | null;
+  }): Promise<void> {
+    try {
+      const entry = this.auditLogRepo.create({
+        pedidoId: opts.pedidoId,
+        evento: opts.evento,
+        usuario: opts.usuario ?? null,
+        area: opts.area ?? null,
+        nota: opts.nota ?? null,
+        stageAnterior: opts.stageAnterior ?? null,
+        stageNuevo: opts.stageNuevo ?? null,
+        metadata: opts.metadata ?? null,
+      });
+      await this.auditLogRepo.save(entry);
+    } catch (err) {
+      this.logger.error(`Error al registrar audit log para pedido ${opts.pedidoId}: ${(err as Error).message}`);
+    }
+  }
+
+  async getAuditLog(pedidoId: string): Promise<PedidoAuditLog[]> {
+    await this.findById(pedidoId);
+    return this.auditLogRepo.find({
+      where: { pedidoId },
+      order: { createdAt: 'ASC' },
+    });
+  }
 
   // ── HELPERS ──────────────────────────────────────────────────────────
 
@@ -54,6 +94,14 @@ export class PedidosService {
         'Este pedido figura como rechazado y no puede avanzar ni modificarse en el circuito de suministros.',
       );
     }
+  }
+
+  private canDeletePedido(pedido: Pedido, user: User): boolean {
+    const isOwner = pedido.creadoPor?.id === user.id;
+    const isSecretaria = user.rol === UserRole.SECRETARIA;
+    const isAdmin = user.rol === UserRole.ADMIN;
+    const isSistemas = user.areaAsignada === AreaMunicipal.SISTEMAS;
+    return isOwner || isSecretaria || isAdmin || isSistemas;
   }
 
   // ── QUERIES ──────────────────────────────────────────────────────────
@@ -95,11 +143,20 @@ export class PedidosService {
     }
   }
 
-  async archivar(id: string): Promise<Pedido> {
+  async archivar(id: string, user?: User): Promise<Pedido> {
     const pedido = await this.findById(id);
     if (pedido.archivedAt) throw new BadRequestException('El pedido ya está archivado.');
     pedido.archivedAt = new Date();
-    return this.pedidosRepo.save(pedido);
+    const saved = await this.pedidosRepo.save(pedido);
+    await this.insertAuditLog({
+      pedidoId: id,
+      evento: PedidoAuditEvento.ARCHIVADO,
+      usuario: user ?? null,
+      area: pedido.area,
+      stageAnterior: pedido.stage,
+      stageNuevo: pedido.stage,
+    });
+    return saved;
   }
 
   async desarchivar(id: string): Promise<Pedido> {
@@ -183,11 +240,23 @@ export class PedidosService {
     const numero = await this.generateNumero();
     const pedido = this.pedidosRepo.create({
       ...dto,
+      urgente: dto.urgente === true,
       numero,
       stage: PedidoStage.APROBACION,
       creadoPor: user,
     });
     const saved = await this.pedidosRepo.save(pedido);
+
+    await this.insertAuditLog({
+      pedidoId: saved.id,
+      evento: PedidoAuditEvento.CREACION,
+      usuario: user,
+      area: dto.area,
+      nota: dto.detalle ?? null,
+      stageAnterior: null,
+      stageNuevo: PedidoStage.APROBACION,
+      metadata: { urgente: dto.urgente ?? false },
+    });
 
     if (archivosReferencia.length > 0) {
       if (!this.archivosService.isStorageAvailable()) {
@@ -218,10 +287,21 @@ export class PedidosService {
     const pedido = await this.findById(id);
     this.assertNotRechazado(pedido);
     this.assertStage(pedido, PedidoStage.APROBACION, 'Solo se pueden aprobar pedidos en etapa de Aprobación');
+    const stageAnterior = pedido.stage;
     pedido.stage = PedidoStage.PRESUPUESTOS;
     pedido.aprobadoPor = user;
     pedido.notaAprobacion = dto.nota;
-    return this.pedidosRepo.save(pedido);
+    const saved = await this.pedidosRepo.save(pedido);
+    await this.insertAuditLog({
+      pedidoId: id,
+      evento: PedidoAuditEvento.APROBACION,
+      usuario: user,
+      area: pedido.area,
+      nota: dto.nota ?? null,
+      stageAnterior,
+      stageNuevo: saved.stage,
+    });
+    return saved;
   }
 
   // Etapa 1 → 7: Secretaría rechaza
@@ -229,11 +309,22 @@ export class PedidosService {
     const pedido = await this.findById(id);
     if (pedido.stage !== PedidoStage.APROBACION && pedido.stage !== PedidoStage.FIRMA)
       throw new BadRequestException('Solo se pueden rechazar pedidos en etapa Aprobación o Firma');
+    const stageAnterior = pedido.stage;
     pedido.rechazadoDesdeStage = pedido.stage;
     pedido.stage = PedidoStage.RECHAZADO;
     pedido.aprobadoPor = user;
     pedido.notaRechazo = dto.motivo;
-    return this.pedidosRepo.save(pedido);
+    const saved = await this.pedidosRepo.save(pedido);
+    await this.insertAuditLog({
+      pedidoId: id,
+      evento: PedidoAuditEvento.RECHAZO,
+      usuario: user,
+      area: pedido.area,
+      nota: dto.motivo,
+      stageAnterior,
+      stageNuevo: PedidoStage.RECHAZADO,
+    });
+    return saved;
   }
 
   // Etapa 2 → 3: Compras envía a Secretaría para firma
@@ -250,8 +341,19 @@ export class PedidosService {
     const mejor = presupuestos.reduce((a, b) => a.monto < b.monto ? a : b);
     pedido.proveedorSeleccionado = mejor.proveedor;
     pedido.monto = mejor.monto;
+    const stageAnterior = pedido.stage;
     pedido.stage = PedidoStage.FIRMA;
-    return this.pedidosRepo.save(pedido);
+    const saved = await this.pedidosRepo.save(pedido);
+    await this.insertAuditLog({
+      pedidoId: id,
+      evento: PedidoAuditEvento.PRESUPUESTO_ENVIADO,
+      usuario: user,
+      area: pedido.area,
+      stageAnterior,
+      stageNuevo: PedidoStage.FIRMA,
+      metadata: { proveedor: mejor.proveedor, monto: mejor.monto },
+    });
+    return saved;
   }
 
   // Etapa 2 → 3: También puede ser manual (Compras elige proveedor)
@@ -262,8 +364,19 @@ export class PedidosService {
     const presup = await this.presupuestosService.findById(presupuestoId);
     pedido.proveedorSeleccionado = presup.proveedor;
     pedido.monto = presup.monto;
+    const stageAnterior = pedido.stage;
     pedido.stage = PedidoStage.FIRMA;
-    return this.pedidosRepo.save(pedido);
+    const saved = await this.pedidosRepo.save(pedido);
+    await this.insertAuditLog({
+      pedidoId: id,
+      evento: PedidoAuditEvento.PRESUPUESTO_ENVIADO,
+      usuario: user,
+      area: pedido.area,
+      stageAnterior,
+      stageNuevo: PedidoStage.FIRMA,
+      metadata: { proveedor: presup.proveedor, monto: presup.monto },
+    });
+    return saved;
   }
 
   // Etapa 3 → 4: Secretaría firma presupuesto (usa firma del perfil)
@@ -313,6 +426,23 @@ export class PedidosService {
 
     const saved = await this.pedidosRepo.save(pedido);
 
+    await this.insertAuditLog({
+      pedidoId: id,
+      evento: PedidoAuditEvento.FIRMA,
+      usuario: user,
+      area: pedido.area,
+      nota: dto.nota ?? null,
+      stageAnterior: PedidoStage.FIRMA,
+      stageNuevo: PedidoStage.CARGA_FACTURA,
+      metadata: {
+        proveedor: presup.proveedor,
+        monto: presup.monto,
+        modoFirma,
+        firmaHash: saved.firmaHash ?? null,
+        requiereSellado: requiereSellado,
+      },
+    });
+
     // Generate Orden de Compra PDF asynchronously (non-blocking for the response)
     this.generateOrdenCompra(saved, presup, user).catch((err) =>
       this.logger.error(`Error generando OC para pedido ${id}: ${err.message}`),
@@ -342,7 +472,17 @@ export class PedidosService {
     this.assertStage(pedido, PedidoStage.FIRMA);
     pedido.stage = PedidoStage.PRESUPUESTOS;
     pedido.notaRechazo = dto.motivo;
-    return this.pedidosRepo.save(pedido);
+    const saved = await this.pedidosRepo.save(pedido);
+    await this.insertAuditLog({
+      pedidoId: id,
+      evento: PedidoAuditEvento.PRESUPUESTO_RECHAZADO,
+      usuario: user,
+      area: pedido.area,
+      nota: dto.motivo,
+      stageAnterior: PedidoStage.FIRMA,
+      stageNuevo: PedidoStage.PRESUPUESTOS,
+    });
+    return saved;
   }
 
   // Etapa 4 → 5: Compras sube factura del proveedor → Tesorería
@@ -373,8 +513,19 @@ export class PedidosService {
     pedido.facturaSubidaPor = user;
     pedido.facturaSubidaEn = new Date();
     pedido.fechaLimitePago = fechaLimitePago ? new Date(fechaLimitePago) : null;
+    const stageAnteriorFactura = pedido.stage;
     pedido.stage = PedidoStage.GESTION_PAGOS;
-    return this.pedidosRepo.save(pedido);
+    const saved = await this.pedidosRepo.save(pedido);
+    await this.insertAuditLog({
+      pedidoId: id,
+      evento: PedidoAuditEvento.FACTURA_SUBIDA,
+      usuario: user,
+      area: pedido.area,
+      stageAnterior: stageAnteriorFactura,
+      stageNuevo: PedidoStage.GESTION_PAGOS,
+      metadata: { fechaLimitePago: fechaLimitePago ?? null },
+    });
+    return saved;
   }
 
   // Etapa 5 → 6: Tesorería registra pago → pasa a Esperando suministros
@@ -385,7 +536,17 @@ export class PedidosService {
     if (pedido.bloqueado)
       throw new BadRequestException('El pedido está bloqueado. Registrá el sellado provincial primero.');
     pedido.stage = PedidoStage.ESPERANDO_SUMINISTROS;
-    return this.pedidosRepo.save(pedido);
+    const saved = await this.pedidosRepo.save(pedido);
+    await this.insertAuditLog({
+      pedidoId: id,
+      evento: PedidoAuditEvento.PAGO,
+      usuario: user,
+      area: pedido.area,
+      stageAnterior: PedidoStage.GESTION_PAGOS,
+      stageNuevo: PedidoStage.ESPERANDO_SUMINISTROS,
+      metadata: { monto: pedido.monto ?? null, proveedor: pedido.proveedorSeleccionado ?? null },
+    });
+    return saved;
   }
 
   // Desbloquear cuando sellado está registrado
@@ -396,7 +557,7 @@ export class PedidosService {
     return this.pedidosRepo.save(pedido);
   }
 
-  // Etapa 5 → 6: Admin confirma recepción de suministros
+  // Etapa 6 → 7: Admin confirma recepción de suministros
   async confirmarRecepcion(id: string, dto: ConfirmarRecepcionDto, user: User): Promise<Pedido> {
     const pedido = await this.findById(id);
     this.assertNotRechazado(pedido);
@@ -404,7 +565,61 @@ export class PedidosService {
     pedido.stage = PedidoStage.SUMINISTROS_LISTOS;
     pedido.recepcionConfirmadaPor = user;
     pedido.recepcionEn = new Date();
-    return this.pedidosRepo.save(pedido);
+    pedido.notaRecepcion = dto.nota ?? null;
+    pedido.areaRecepcion = dto.areaRecepcion ?? null;
+    const saved = await this.pedidosRepo.save(pedido);
+    await this.insertAuditLog({
+      pedidoId: id,
+      evento: PedidoAuditEvento.RECEPCION_CONFIRMADA,
+      usuario: user,
+      area: dto.areaRecepcion ?? pedido.area,
+      nota: dto.nota ?? null,
+      stageAnterior: PedidoStage.ESPERANDO_SUMINISTROS,
+      stageNuevo: PedidoStage.SUMINISTROS_LISTOS,
+      metadata: { areaRecepcion: dto.areaRecepcion ?? null },
+    });
+    return saved;
+  }
+
+  async remove(id: string, user: User): Promise<{ deleted: true; id: string }> {
+    const pedido = await this.findById(id);
+
+    if (pedido.stage !== PedidoStage.APROBACION) {
+      throw new BadRequestException(
+        'Solo se pueden eliminar pedidos que sigan en la etapa Aprobación de suministros.',
+      );
+    }
+
+    if (!this.canDeletePedido(pedido, user)) {
+      throw new ForbiddenException(
+        'No tenés permiso para eliminar este pedido. Solo puede hacerlo quien lo creó, Secretaría o Sistemas.',
+      );
+    }
+
+    await this.pedidosRepo.remove(pedido);
+
+    if (pedido.referenciasImagenes?.length) {
+      for (const referencia of pedido.referenciasImagenes) {
+        if (!referencia?.path) continue;
+        try {
+          await this.archivosService.deleteFile(referencia.path);
+        } catch (err) {
+          this.logger.warn(
+            `No se pudo eliminar la referencia ${referencia.path} del pedido ${id}: ${(err as Error).message}`,
+          );
+        }
+      }
+    }
+
+    try {
+      await this.auditLogRepo.delete({ pedidoId: id });
+    } catch (err) {
+      this.logger.warn(
+        `No se pudo limpiar el audit log del pedido ${id}: ${(err as Error).message}`,
+      );
+    }
+
+    return { deleted: true, id };
   }
 
   // ── COMENTARIOS ──────────────────────────────────────────────────────
