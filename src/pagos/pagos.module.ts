@@ -1,7 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, OneToOne, JoinColumn, ManyToOne, CreateDateColumn } from 'typeorm';
 import { Pedido } from '../pedidos/pedido.entity';
 import { User } from '../users/user.entity';
-import { Injectable, BadRequestException, NotFoundException, Module, Controller, Get, Post, Body, Param, UseGuards, Request } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Module, Controller, Get, Post, Body, Param, UseGuards, Request, ValidationPipe } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -16,6 +16,7 @@ import { UserRole } from '../users/user.entity';
  import { PedidosService } from '../pedidos/pedidos.service';
 import { UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { ArchivosService } from '../archivos/archivos.service';
 import { ArchivosModule } from '../archivos/archivos.module';
 
@@ -115,11 +116,11 @@ export class PagosController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles(UserRole.TESORERIA, UserRole.ADMIN)
-  @UseInterceptors(FileInterceptor('factura'))
+  @UseInterceptors(FileInterceptor('factura', { storage: memoryStorage() }))
   @ApiOperation({ summary: 'Registrar pago y adjuntar factura' })
   async registrar(
     @Param('pedidoId') pedidoId: string,
-    @Body() dto: RegistrarPagoDto,
+    @Body(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: false, transformOptions: { enableImplicitConversion: true } })) dto: RegistrarPagoDto,
     @Request() req,
     @UploadedFile() file?: Express.Multer.File,
   ) {

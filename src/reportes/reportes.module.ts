@@ -22,6 +22,7 @@ import {
   UploadedFile,
   ForbiddenException,
   NotFoundException,
+  ValidationPipe,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -29,6 +30,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { IsString, IsNotEmpty, IsEnum, IsOptional } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -251,10 +253,10 @@ export class ReportesController {
   ) {}
 
   @Post()
-  @UseInterceptors(FileInterceptor('screenshot'))
+  @UseInterceptors(FileInterceptor('screenshot', { storage: memoryStorage() }))
   @ApiOperation({ summary: 'Crear reporte de problema' })
   async create(
-    @Body() dto: CreateReporteDto,
+    @Body(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: false, transformOptions: { enableImplicitConversion: true } })) dto: CreateReporteDto,
     @Request() req,
     @UploadedFile() file?: Express.Multer.File,
   ) {

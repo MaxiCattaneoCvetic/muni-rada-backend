@@ -12,41 +12,50 @@ import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
 import * as path from 'path';
 import * as fs from 'fs';
+import { SupabaseStorageService } from './supabase-storage.service';
 
 // ── SERVICE ───────────────────────────────────────────────────────────
 
 @Injectable()
 export class ArchivosService {
-  /** Carpeta raíz donde se guardan los archivos. En Railway: montar un Volume aquí. */
+  /** Carpeta raíz donde se guardan los archivos (solo si no se usa Supabase). */
   private readonly uploadsDir: string;
   /** URL base del backend, usada para construir las URLs públicas de los archivos. */
   private readonly appUrl: string;
+  /** Indicador de si se usa Supabase Storage o filesystem local. */
+  private readonly useSupabase: boolean;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private supabaseStorage: SupabaseStorageService,
+  ) {
     this.uploadsDir = configService.get<string>('UPLOADS_DIR', './uploads');
     this.appUrl = configService.get<string>('APP_URL', 'http://localhost:3000');
+    this.useSupabase = this.supabaseStorage.isStorageAvailable();
 
-    if (!fs.existsSync(this.uploadsDir)) {
+    if (!this.useSupabase && !fs.existsSync(this.uploadsDir)) {
       fs.mkdirSync(this.uploadsDir, { recursive: true });
     }
   }
 
-  /** Siempre disponible — el filesystem siempre está presente. */
   isStorageAvailable(): boolean {
-    return true;
+    return this.useSupabase || true;
   }
 
   private buildUrl(relativePath: string): string {
     return `${this.appUrl.replace(/\/$/, '')}/api/archivos/${relativePath}`;
   }
 
-  /** Sube un buffer a la carpeta `folder` con el nombre `filename`. */
   async uploadBuffer(
     buffer: Buffer,
     folder: string,
     filename: string,
-    _contentType: string,
+    contentType: string,
   ): Promise<{ url: string; path: string }> {
+    if (this.useSupabase) {
+      return this.supabaseStorage.uploadBuffer(buffer, folder, filename, contentType);
+    }
+
     const folderPath = path.join(this.uploadsDir, folder);
     if (!fs.existsSync(folderPath)) {
       fs.mkdirSync(folderPath, { recursive: true });
@@ -68,36 +77,65 @@ export class ArchivosService {
 
   async uploadFirma(file: Express.Multer.File, userId: string) {
     this.validateImage(file);
+    if (this.useSupabase) {
+      return this.supabaseStorage.uploadFirma(file, userId);
+    }
     return this.uploadFile(file, 'firmas', `firma_${userId}_${Date.now()}`);
   }
 
   async uploadPresupuesto(file: Express.Multer.File, pedidoId: string) {
     this.validatePdf(file);
+    if (this.useSupabase) {
+      return this.supabaseStorage.uploadPresupuesto(file, pedidoId);
+    }
     return this.uploadFile(file, 'presupuestos', `presupuesto_${pedidoId}_${Date.now()}`);
+  }
+
+  async uploadPresupuestoFirmado(file: Express.Multer.File, pedidoId: string, presupuestoId: string) {
+    this.validatePdf(file);
+    if (this.useSupabase) {
+      return this.supabaseStorage.uploadPresupuestoFirmado(file, pedidoId, presupuestoId);
+    }
+    return this.uploadFile(file, 'presupuestos_firmados', `presupuesto_firmado_${pedidoId}_${presupuestoId}_${Date.now()}`);
   }
 
   async uploadComprobanteSellado(file: Express.Multer.File, pedidoId: string) {
     this.validatePdf(file);
+    if (this.useSupabase) {
+      return this.supabaseStorage.uploadComprobanteSellado(file, pedidoId);
+    }
     return this.uploadFile(file, 'sellados', `sellado_${pedidoId}_${Date.now()}`);
   }
 
   async uploadFactura(file: Express.Multer.File, pedidoId: string) {
     this.validatePdf(file);
+    if (this.useSupabase) {
+      return this.supabaseStorage.uploadFactura(file, pedidoId);
+    }
     return this.uploadFile(file, 'facturas', `factura_${pedidoId}_${Date.now()}`);
   }
 
   async uploadFacturaCompras(file: Express.Multer.File, pedidoId: string) {
     this.validatePdf(file);
+    if (this.useSupabase) {
+      return this.supabaseStorage.uploadFacturaCompras(file, pedidoId);
+    }
     return this.uploadFile(file, 'facturas_compras', `factura_compras_${pedidoId}_${Date.now()}`);
   }
 
   async uploadReferenciaPedido(file: Express.Multer.File, pedidoId: string, suffix: string) {
     this.validateReferenciaImagen(file);
+    if (this.useSupabase) {
+      return this.supabaseStorage.uploadReferenciaPedido(file, pedidoId, suffix);
+    }
     return this.uploadFile(file, 'referencias_pedidos', `ref_${pedidoId}_${suffix}`);
   }
 
   async uploadOrdenCompra(buffer: Buffer, pedidoId: string, ocNumero: string) {
     const safeNumero = ocNumero.replace(/[^a-zA-Z0-9\-]/g, '_');
+    if (this.useSupabase) {
+      return this.supabaseStorage.uploadOrdenCompra(buffer, pedidoId, ocNumero);
+    }
     return this.uploadBuffer(
       buffer,
       'ordenes_compra',
@@ -106,8 +144,11 @@ export class ArchivosService {
     );
   }
 
-  /** Devuelve el buffer y el mimetype de un archivo almacenado. */
   async getFile(relativePath: string): Promise<{ buffer: Buffer; mimetype: string }> {
+    if (this.useSupabase) {
+      return this.supabaseStorage.getFile(relativePath);
+    }
+
     const safe = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '');
     const filePath = path.join(this.uploadsDir, safe);
     if (!fs.existsSync(filePath)) throw new NotFoundException('Archivo no encontrado');
@@ -125,6 +166,10 @@ export class ArchivosService {
   }
 
   async deleteFile(relativePath: string): Promise<void> {
+    if (this.useSupabase) {
+      return this.supabaseStorage.deleteFile(relativePath);
+    }
+
     const safe = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '');
     const filePath = path.join(this.uploadsDir, safe);
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -180,7 +225,7 @@ export class ArchivosController {
 // ── MODULE ────────────────────────────────────────────────────────────
 
 @Module({
-  providers: [ArchivosService],
+  providers: [ArchivosService, SupabaseStorageService],
   controllers: [ArchivosController],
   exports: [ArchivosService],
 })

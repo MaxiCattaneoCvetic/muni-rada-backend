@@ -39,6 +39,12 @@ export class Presupuesto {
   @Column({ nullable: true, name: 'archivo_path' })
   archivoPath: string;
 
+  @Column({ nullable: true, name: 'archivo_firmado_url' })
+  archivoFirmadoUrl: string;
+
+  @Column({ nullable: true, name: 'archivo_firmado_path' })
+  archivoFirmadoPath: string;
+
   @ManyToOne(() => User, { nullable: true })
   @JoinColumn({ name: 'cargado_por_id' })
   cargadoPor: User;

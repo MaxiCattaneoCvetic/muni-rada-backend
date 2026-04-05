@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Delete, Body, Param, UseGuards, Request, UseInterceptors, UploadedFile, Module } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, UseGuards, Request, UseInterceptors, UploadedFile, Module, ValidationPipe } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PresupuestosService, CreatePresupuestoDto } from './presupuestos.service';
@@ -31,11 +32,11 @@ export class PresupuestosController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles(UserRole.COMPRAS, UserRole.ADMIN)
-  @UseInterceptors(FileInterceptor('archivo'))
+  @UseInterceptors(FileInterceptor('archivo', { storage: memoryStorage() }))
   @ApiOperation({ summary: 'Cargar presupuesto (con PDF opcional)' })
   async create(
     @Param('pedidoId') pedidoId: string,
-    @Body() dto: CreatePresupuestoDto,
+    @Body(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: false, transformOptions: { enableImplicitConversion: true } })) dto: CreatePresupuestoDto,
     @Request() req,
     @UploadedFile() file?: Express.Multer.File,
   ) {

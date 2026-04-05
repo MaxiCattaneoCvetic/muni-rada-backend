@@ -146,34 +146,9 @@ export class PedidosService {
 
   // Pedidos que le corresponden según rol
   async findForRole(user: User, filter: PedidoFilterDto = {}): Promise<Pedido[]> {
-    const stagesByRole: Record<UserRole, PedidoStage[]> = {
-      // Secretaría actúa en 1 y 3, pero ve también 2 para seguimiento (presupuestos en curso en Compras).
-      [UserRole.SECRETARIA]: [
-        PedidoStage.APROBACION, PedidoStage.PRESUPUESTOS, PedidoStage.FIRMA, PedidoStage.CARGA_FACTURA,
-        PedidoStage.RECHAZADO,
-      ],
-      [UserRole.COMPRAS]: [PedidoStage.PRESUPUESTOS, PedidoStage.CARGA_FACTURA, PedidoStage.RECHAZADO],
-      [UserRole.TESORERIA]: [PedidoStage.GESTION_PAGOS],
-      [UserRole.ADMIN]: [
-        PedidoStage.APROBACION, PedidoStage.PRESUPUESTOS, PedidoStage.FIRMA, PedidoStage.CARGA_FACTURA,
-        PedidoStage.GESTION_PAGOS, PedidoStage.ESPERANDO_SUMINISTROS, PedidoStage.SUMINISTROS_LISTOS,
-        PedidoStage.RECHAZADO,
-      ],
-    };
-    const stages = stagesByRole[user.rol] || [];
-
-    if (filter.stage !== undefined) {
-      if (!stages.includes(filter.stage as PedidoStage))
-        throw new ForbiddenException('No tenés acceso a esa etapa');
-      return this.findAll(filter);
-    }
-
-    const all = await Promise.all(stages.map(s => this.findAll({ ...filter, stage: s })));
-    return all.flat().sort((a, b) => {
-      if (a.urgente && !b.urgente) return -1;
-      if (!a.urgente && b.urgente) return 1;
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
+    // Todos los roles ven todos los pedidos activos — la restricción de edición
+    // se aplica a nivel de acción en cada endpoint de mutación, no en el listado.
+    return this.findAll(filter);
   }
 
   // Estadísticas para dashboard
@@ -292,7 +267,15 @@ export class PedidosService {
   }
 
   // Etapa 3 → 4: Secretaría firma presupuesto (usa firma del perfil)
-  async firmar(id: string, dto: FirmarPresupuestoDto, user: User): Promise<Pedido> {
+  async firmar(
+    id: string,
+    dto: FirmarPresupuestoDto,
+    user: User,
+    presupuestoFirmado?: Express.Multer.File,
+  ): Promise<Pedido> {
+    if (!dto.presupuestoId?.trim()) {
+      throw new BadRequestException('Debés seleccionar un presupuesto para firmar.');
+    }
     const pedido = await this.findById(id);
     this.assertNotRechazado(pedido);
     this.assertStage(pedido, PedidoStage.FIRMA, 'El pedido debe estar en etapa de Firma');
@@ -301,8 +284,19 @@ export class PedidosService {
     if (presup.pedidoId !== id)
       throw new BadRequestException('El presupuesto no pertenece a este pedido');
 
-    if (!user.firmaUrl)
+    const modoFirma = dto.modoFirma === 'escaneado' ? 'escaneado' : 'digital';
+
+    if (modoFirma === 'digital' && !user.firmaUrl)
       throw new BadRequestException('No tenés una firma configurada en tu perfil. Subí tu firma escaneada primero.');
+    if (modoFirma === 'escaneado' && !presupuestoFirmado)
+      throw new BadRequestException('Debés adjuntar el presupuesto escaneado y firmado en PDF.');
+
+    if (modoFirma === 'escaneado' && presupuestoFirmado) {
+      const firmado = await this.archivosService.uploadPresupuestoFirmado(presupuestoFirmado, id, presup.id);
+      await this.presupuestosService.updateArchivoFirmado(presup.id, firmado.url, firmado.path);
+      presup.archivoFirmadoUrl = firmado.url;
+      presup.archivoFirmadoPath = firmado.path;
+    }
 
     pedido.proveedorSeleccionado = presup.proveedor;
     pedido.monto = presup.monto;
@@ -312,7 +306,7 @@ export class PedidosService {
 
     pedido.stage = PedidoStage.CARGA_FACTURA;
     pedido.firmadoPor = user;
-    pedido.firmaUrlUsada = user.firmaUrl;
+    pedido.firmaUrlUsada = modoFirma === 'digital' ? user.firmaUrl : null;
     pedido.firmadoEn = new Date();
     pedido.bloqueado = requiereSellado;
     pedido.firmaHash = crypto.randomBytes(8).toString('hex').toUpperCase();

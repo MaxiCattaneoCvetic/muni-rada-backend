@@ -1,8 +1,10 @@
 import {
   Controller, Get, Post, Put, Patch, Body, Param, Query,
   UseGuards, Request, UseInterceptors, UploadedFile, UploadedFiles, ParseUUIDPipe,
+  ValidationPipe,
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PedidosService } from './pedidos.service';
 import {
@@ -53,10 +55,10 @@ export class PedidosController {
   // ── CREAR ──
   @Post()
   @ApiConsumes('multipart/form-data')
-  @UseInterceptors(FilesInterceptor('referencias', 8))
+  @UseInterceptors(FilesInterceptor('referencias', 8, { storage: memoryStorage() }))
   @ApiOperation({ summary: 'Crear nuevo pedido (campos de formulario + imágenes de referencia opcionales)' })
   create(
-    @Body() dto: CreatePedidoDto,
+    @Body(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: false, transformOptions: { enableImplicitConversion: true } })) dto: CreatePedidoDto,
     @Request() req,
     @UploadedFiles() referencias?: Express.Multer.File[],
   ) {
@@ -107,20 +109,36 @@ export class PedidosController {
   @Patch(':id/firmar')
   @UseGuards(RolesGuard)
   @Roles(UserRole.SECRETARIA, UserRole.ADMIN)
+  @UseInterceptors(FileInterceptor('presupuestoFirmado', { storage: memoryStorage() }))
+  @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Firmar presupuesto (Secretaría)' })
-  firmar(@Param('id') id: string, @Body() dto: FirmarPresupuestoDto, @Request() req) {
-    return this.service.firmar(id, dto, req.user);
+  firmar(
+    @Param('id') id: string,
+    @Body() body: { presupuestoId?: string; modoFirma?: 'digital' | 'escaneado'; nota?: string },
+    @Request() req,
+    @UploadedFile() presupuestoFirmado?: Express.Multer.File,
+  ) {
+    return this.service.firmar(
+      id,
+      {
+        presupuestoId: String(body?.presupuestoId ?? ''),
+        modoFirma: body?.modoFirma,
+        nota: body?.nota,
+      },
+      req.user,
+      presupuestoFirmado,
+    );
   }
 
   // ── ETAPA 4→5: SUBIR FACTURA (Compras) ──
   @Patch(':id/subir-factura')
   @UseGuards(RolesGuard)
   @Roles(UserRole.COMPRAS, UserRole.ADMIN)
-  @UseInterceptors(FileInterceptor('factura'))
+  @UseInterceptors(FileInterceptor('factura', { storage: memoryStorage() }))
   @ApiOperation({ summary: 'Subir factura del proveedor y enviar a Tesorería (Compras)' })
   subirFactura(
     @Param('id') id: string,
-    @Body() dto: SubirFacturaDto,
+    @Body(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: false, transformOptions: { enableImplicitConversion: true } })) dto: SubirFacturaDto,
     @Request() req,
     @UploadedFile() file: Express.Multer.File,
   ) {

@@ -3,6 +3,7 @@ import {
   UseGuards, Request, UploadedFile, UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { ArchivosService } from '../archivos/archivos.service';
@@ -84,7 +85,7 @@ export class UsersController {
 
   // POST /api/users/me/firma — subir firma escaneada
   @Post('me/firma')
-  @UseInterceptors(FileInterceptor('firma'))
+  @UseInterceptors(FileInterceptor('firma', { storage: memoryStorage() }))
   @ApiOperation({ summary: 'Subir firma escaneada (Secretaría)' })
   async uploadFirma(@Request() req, @UploadedFile() file: Express.Multer.File) {
     const { url, path } = await this.archivosService.uploadFirma(file, req.user.id);

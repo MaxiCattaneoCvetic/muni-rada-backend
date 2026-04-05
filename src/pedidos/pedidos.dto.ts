@@ -51,6 +51,10 @@ export class FirmarPresupuestoDto {
   @IsUUID()
   presupuestoId: string;
 
+  @ApiPropertyOptional({ enum: ['digital', 'escaneado'], description: 'Modo de firma del presupuesto' })
+  @IsString() @IsOptional()
+  modoFirma?: 'digital' | 'escaneado';
+
   @ApiPropertyOptional()
   @IsString() @IsOptional()
   nota?: string;

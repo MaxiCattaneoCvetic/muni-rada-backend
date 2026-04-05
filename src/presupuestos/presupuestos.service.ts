@@ -67,4 +67,11 @@ export class PresupuestosService {
     p.archivoPath = path;
     return this.repo.save(p);
   }
+
+  async updateArchivoFirmado(id: string, url: string, path: string): Promise<Presupuesto> {
+    const p = await this.findById(id);
+    p.archivoFirmadoUrl = url;
+    p.archivoFirmadoPath = path;
+    return this.repo.save(p);
+  }
 }

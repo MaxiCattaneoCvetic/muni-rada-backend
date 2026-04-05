@@ -1,14 +1,20 @@
 /** Áreas municipales (pedidos y permisos de usuario). */
 export enum AreaMunicipal {
-  ADMINISTRACION = 'Administración',
+  AUTOMOTORES = 'Automotores',
+  COMPRAS = 'Compras',
+  CULTURA = 'Cultura',
+  GOBIERNO = 'Gobierno',
+  GUARDIA_URBANA = 'Guardia Urbana',
+  HACIENDA = 'Hacienda',
+  LICENCIA_DE_CONDUCIR = 'Licencia de Conducir',
+  MEDIO_AMBIENTE = 'Medio Ambiente',
   OBRAS_PUBLICAS = 'Obras Públicas',
-  SISTEMAS = 'Sistemas',
+  RENTAS = 'Rentas',
   RRHH = 'RRHH',
-  CATASTRO = 'Catastro',
-  INTENDENCIA = 'Intendencia',
-  TURISMO = 'Turismo',
-  TESORERIA_AREA = 'Tesorería',
   SECRETARIA_AREA = 'Secretaría',
+  SISTEMAS = 'Sistemas',
+  TESORERIA_AREA = 'Tesorería',
+  TURISMO_Y_DEPORTES = 'Turismo y Deportes',
 }
 
 export const ALL_AREAS_MUNICIPALES = Object.values(AreaMunicipal) as AreaMunicipal[];

@@ -15,6 +15,7 @@ import { FinanzasModule } from './finanzas/finanzas.module';
 import { ReportesModule, Reporte, ReporteMensaje } from './reportes/reportes.module';
 import { User } from './users/user.entity';
 import { Pedido } from './pedidos/pedido.entity';
+import { PedidoComentario } from './pedidos/pedido-comentario.entity';
 import { Presupuesto } from './presupuestos/presupuesto.entity';
 import { Proveedor } from './proveedores/proveedor.entity';
 import { ProveedorComentario } from './proveedores/proveedor-comentario.entity';
@@ -23,7 +24,7 @@ import { Sellado } from './sellados/sellados.module';
 
 /** Entidades registradas en el DataSource global (el glob *.entity.ts no incluye clases definidas en *.module.ts). */
 const TYPEORM_ENTITIES = [
-  User, Pedido, Presupuesto, Proveedor, ProveedorComentario, Pago, Sellado, SistemaConfig, Reporte, ReporteMensaje,
+  User, Pedido, PedidoComentario, Presupuesto, Proveedor, ProveedorComentario, Pago, Sellado, SistemaConfig, Reporte, ReporteMensaje,
 ];
 
 @Module({
